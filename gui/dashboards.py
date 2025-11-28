@@ -1,0 +1,306 @@
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QGridLayout,
+    QLabel,
+    QPushButton,
+    QMessageBox,
+    QFrame,
+)
+
+from .style import apply_base_style, ORANGE, TEAL
+from Roots.models import Librarian, Member
+from .books_window import BooksWindow
+from .member_window import MembersWindow
+from .loan_window import LoansWindow
+from .club_window import LibrarianClubsWindow, MemberClubsWindow
+from Roots.daos import (
+    get_due_soon_loans_for_member,
+    get_loans_for_member,
+    count_members,
+    count_books,
+    count_active_loans,
+    count_clubs,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helper: small “tile” widget used on both dashboards
+# ---------------------------------------------------------------------------
+
+def _make_tile(title: str, number: str, color: str) -> QWidget:
+    """
+    Create a small info tile with a title and a big number.
+    Used in both LibrarianDashboard and MemberDashboard.
+    """
+    frame = QFrame()
+    layout = QVBoxLayout(frame)
+    layout.setContentsMargins(8, 8, 8, 8)
+
+    header = QLabel(title.upper())
+    header.setObjectName("SubtitleLabel")
+
+    value = QLabel(number)
+    value.setStyleSheet(
+        f"font-size: 18px; font-weight: 700; color: {color};"
+    )
+
+    layout.addWidget(header)
+    layout.addWidget(value)
+
+    return frame
+
+
+# ---------------------------------------------------------------------------
+# Librarian dashboard (admin view)
+# ---------------------------------------------------------------------------
+
+class LibrarianDashboard(QMainWindow):
+    """
+    Admin view for Francisca, Abril, Abubakar.
+    """
+
+    def __init__(self, librarian: Librarian):
+        super().__init__()
+
+        self.librarian = librarian
+        self.setWindowTitle("Francisca SmartLibrary - Librarian Dashboard")
+        self.resize(900, 520)
+
+        # central layout
+        central = QWidget()
+        self.setCentralWidget(central)
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(10)
+
+        # header text
+        title = QLabel(f"Welcome, {self.librarian.full_name}")
+        title.setObjectName("TitleLabel")
+
+        subtitle = QLabel(
+            "Librarian control panel – manage books, members, loans & clubs."
+        )
+        subtitle.setObjectName("SubtitleLabel")
+
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+
+        # real numbers from database
+        members_count = count_members()
+        books_count = count_books()
+        loans_count = count_active_loans()
+        clubs_count = count_clubs()
+
+        # tiles grid
+        tiles = QGridLayout()
+        tiles.setSpacing(10)
+        tiles.addWidget(
+            _make_tile("Members", str(members_count), ORANGE), 0, 0
+        )
+        tiles.addWidget(
+            _make_tile("Issued books", str(loans_count), TEAL), 0, 1
+        )
+        tiles.addWidget(
+            _make_tile("Books", str(books_count), ORANGE), 1, 0
+        )
+        tiles.addWidget(
+            _make_tile("Clubs", str(clubs_count), TEAL), 1, 1
+        )
+
+        layout.addLayout(tiles)
+
+        # buttons row
+        btn_row = QHBoxLayout()
+        self.btn_books = QPushButton("Manage books")
+        self.btn_members = QPushButton("Manage members")
+        self.btn_loans = QPushButton("Manage loans")
+        self.btn_clubs = QPushButton("Manage clubs")
+        self.btn_logout = QPushButton("Logout")
+        self.btn_logout.setObjectName("Secondary")
+
+        for btn in [
+            self.btn_books,
+            self.btn_members,
+            self.btn_loans,
+            self.btn_clubs,
+        ]:
+            btn.setMinimumHeight(40)
+            btn_row.addWidget(btn)
+
+        layout.addSpacing(10)
+        layout.addLayout(btn_row)
+        layout.addStretch(1)
+        layout.addWidget(self.btn_logout, alignment=Qt.AlignRight)
+
+        apply_base_style(self)
+        self._connect()
+
+    # --- signal wiring -----------------------------------------------------
+
+    def _connect(self):
+        self.btn_books.clicked.connect(self._open_books)
+        self.btn_members.clicked.connect(self._open_members)
+        self.btn_loans.clicked.connect(self._open_loans)
+        self.btn_clubs.clicked.connect(self._open_clubs)
+        self.btn_logout.clicked.connect(self.close)
+
+    # --- button handlers ---------------------------------------------------
+
+    def _open_books(self):
+        dlg = BooksWindow(self, librarian_name=self.librarian.full_name)
+        dlg.exec_()
+
+    def _open_members(self):
+        dlg = MembersWindow(self)
+        dlg.exec_()
+
+    def _open_loans(self):
+        dlg = LoansWindow(self)
+        dlg.exec_()
+
+    def _open_clubs(self):
+        dlg = LibrarianClubsWindow(self)
+        dlg.exec_()
+
+
+# ---------------------------------------------------------------------------
+# Member dashboard (normal user view)
+# ---------------------------------------------------------------------------
+
+class MemberDashboard(QMainWindow):
+    """
+    Simpler dashboard for normal members.
+
+    Includes your idea of a reminder:
+    when they log in, show a popup if books are due soon.
+    """
+
+    def __init__(self, member: Member):
+        super().__init__()
+
+        self.member = member
+        self.setWindowTitle("Francisca SmartLibrary - Member Dashboard")
+        self.resize(800, 480)
+
+        central = QWidget()
+        self.setCentralWidget(central)
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(10)
+
+        title = QLabel(f"Welcome, {self.member.full_name}")
+        title.setObjectName("TitleLabel")
+
+        subtitle = QLabel("Browse books, view your loans and clubs.")
+        subtitle.setObjectName("SubtitleLabel")
+
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+
+        # my loans count from DB
+        my_loans = get_loans_for_member(self.member.member_id)
+        my_loans_count = len(my_loans)
+
+        # NEW: simple reading progress based on completed loans
+        completed_loans = sum(1 for loan in my_loans if loan.return_date is not None)
+        if my_loans_count == 0:
+            progress_percent = 0
+        else:
+            progress_percent = round(completed_loans / my_loans_count * 100)
+
+        tiles = QGridLayout()
+        tiles.setSpacing(10)
+
+        # top row of tiles
+        tiles.addWidget(_make_tile("My loans", str(my_loans_count), ORANGE), 0, 0)
+        tiles.addWidget(_make_tile("Reserved books", "1", TEAL), 0, 1)
+        tiles.addWidget(_make_tile("Clubs joined", "2", ORANGE), 0, 2)
+
+        # second row: reading progress (spans all 3 columns)
+        tiles.addWidget(
+            _make_tile("Reading progress", f"{progress_percent}%", TEAL),
+            1, 0, 1, 3
+        )
+
+        layout.addLayout(tiles)
+
+        # buttons
+        btn_row = QHBoxLayout()
+        self.btn_view_books = QPushButton("View books")
+        self.btn_my_loans = QPushButton("My loans")
+        self.btn_my_clubs = QPushButton("My clubs")
+        self.btn_logout = QPushButton("Logout")
+        self.btn_logout.setObjectName("Secondary")
+
+        for btn in [self.btn_view_books, self.btn_my_loans, self.btn_my_clubs]:
+            btn.setMinimumHeight(40)
+            btn_row.addWidget(btn)
+
+        layout.addSpacing(10)
+        layout.addLayout(btn_row)
+        layout.addStretch(1)
+        layout.addWidget(self.btn_logout, alignment=Qt.AlignRight)
+
+        apply_base_style(self)
+        self._connect()
+        self._show_due_soon_reminder()
+
+    # --- signal wiring -----------------------------------------------------
+
+    def _connect(self):
+        self.btn_view_books.clicked.connect(self._open_books_readonly)
+        self.btn_my_loans.clicked.connect(self._info_loans)
+        self.btn_my_clubs.clicked.connect(self._open_member_clubs)
+        self.btn_logout.clicked.connect(self.close)
+
+    # --- button handlers ---------------------------------------------------
+
+    def _open_books_readonly(self):
+        """
+        Opens the Books window in read-only mode for members.
+        They can browse but not add/edit/delete.
+        """
+        dlg = BooksWindow(self, librarian_name=self.member.full_name)
+        # disable editing for members
+        dlg.btn_add.setDisabled(True)
+        dlg.btn_edit.setDisabled(True)
+        dlg.btn_delete.setDisabled(True)
+        dlg.setWindowTitle("Books catalogue - Francisca SmartLibrary")
+        dlg.exec_()
+
+    def _info_loans(self):
+        # Open the Loans window, filtered for THIS member
+        dlg = LoansWindow(self, member=self.member)
+        dlg.exec_()
+
+    def _open_member_clubs(self):
+        dlg = MemberClubsWindow(self, member=self.member)
+        dlg.exec_()
+
+    # --- reminder when books are nearly due -------------------------------
+
+    def _show_due_soon_reminder(self):
+        """
+        When the member logs in, check for books due soon (e.g. next 3 days)
+        and show a friendly reminder popup.
+        IMPORTANT: use member.member_id, because DAO expects member_id,
+        not user_id.
+        """
+        loans = get_due_soon_loans_for_member(self.member.member_id)
+        if not loans:
+            return
+
+        count = len(loans)
+        nearest_due = min(loan.due_date for loan in loans)
+
+        msg = (
+            f"You have {count} book(s) due soon.\n"
+            f"Nearest due date: {nearest_due}.\n\n"
+            "Please return your books on time."
+        )
+
+        QMessageBox.information(self, "Friendly reminder", msg)
