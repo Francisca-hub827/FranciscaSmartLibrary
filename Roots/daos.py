@@ -328,6 +328,180 @@ def list_members() -> List[Member]:
     return members
 
 
+# ---------- MEMBER CRUD (create / update / delete) ----------
+
+def create_member(full_name: str, email: str, password: str) -> tuple[bool, str]:
+    """
+    Create a new member:
+
+    - Inserts into app_user (username = email, role = 'MEMBER', password_hash using crypt)
+    - Inserts into member(full_name, email, user_id)
+
+    Returns: (success, message)
+    """
+    full_name = (full_name or "").strip()
+    email = (email or "").strip().lower()
+    password = (password or "").strip()
+
+    if not full_name:
+        return False, "Full name cannot be empty."
+    if "@" not in email:
+        return False, "Email must contain '@'."
+    if len(password) < 4:
+        return False, "Password should be at least 4 characters."
+
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Make sure email is not already used
+                cur.execute("SELECT 1 FROM app_user WHERE username = %s;", (email,))
+                if cur.fetchone():
+                    return False, "An account with that email already exists."
+
+                # 1) Create app_user row
+                cur.execute(
+                    """
+                    INSERT INTO app_user(username, password_hash, role)
+                    VALUES (%s, crypt(%s, gen_salt('bf')), 'MEMBER')
+                    RETURNING user_id;
+                    """,
+                    (email, password),
+                )
+                user_row = cur.fetchone()
+                user_id = int(user_row["user_id"])
+
+                # 2) Create member row
+                cur.execute(
+                    """
+                    INSERT INTO member(full_name, email, user_id)
+                    VALUES (%s, %s, %s)
+                    RETURNING member_id;
+                    """,
+                    (full_name, email, user_id),
+                )
+                mem_row = cur.fetchone()
+                member_id = int(mem_row["member_id"])
+
+        return True, f"Member created successfully (ID {member_id})."
+    except Exception as ex:
+        # simple error text for GUI
+        return False, f"Error creating member: {ex}"
+    finally:
+        conn.close()
+
+
+def update_member(
+    member_id: int,
+    full_name: str,
+    email: str,
+    new_password: str | None = None,
+) -> tuple[bool, str]:
+    """
+    Update an existing member's full name, email, and optionally password.
+
+    - Updates member(full_name, email)
+    - Updates app_user.username (email)
+    - If new_password is provided and not empty, resets password_hash.
+    """
+    full_name = (full_name or "").strip()
+    email = (email or "").strip().lower()
+    if not full_name:
+        return False, "Full name cannot be empty."
+    if "@" not in email:
+        return False, "Email must contain '@'."
+
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Find linked user_id
+                cur.execute(
+                    "SELECT user_id FROM member WHERE member_id = %s;",
+                    (member_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return False, "Member not found."
+                user_id = int(row["user_id"])
+
+                # Update member table
+                cur.execute(
+                    """
+                    UPDATE member
+                    SET full_name = %s,
+                        email = %s
+                    WHERE member_id = %s;
+                    """,
+                    (full_name, email, member_id),
+                )
+                if cur.rowcount == 0:
+                    return False, "Member not found (update failed)."
+
+                # Update app_user username (email)
+                cur.execute(
+                    """
+                    UPDATE app_user
+                    SET username = %s
+                    WHERE user_id = %s;
+                    """,
+                    (email, user_id),
+                )
+
+                # Optionally update password
+                new_password = (new_password or "").strip()
+                if new_password:
+                    cur.execute(
+                        """
+                        UPDATE app_user
+                        SET password_hash = crypt(%s, gen_salt('bf'))
+                        WHERE user_id = %s;
+                        """,
+                        (new_password, user_id),
+                    )
+
+        return True, "Member updated successfully."
+    except Exception as ex:
+        return False, f"Error updating member: {ex}"
+    finally:
+        conn.close()
+
+
+def delete_member(member_id: int) -> tuple[bool, str]:
+    """
+    Delete a member and the linked app_user row.
+
+    - Because loan.member_id and club_member.member_id use ON DELETE CASCADE,
+      their rows will be removed automatically when the member row is deleted.
+    """
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Get user_id before deleting member row
+                cur.execute(
+                    "SELECT user_id FROM member WHERE member_id = %s;",
+                    (member_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return False, "Member not found."
+                user_id = int(row["user_id"])
+
+                # Delete member row (this will cascade to loans, club_member)
+                cur.execute("DELETE FROM member WHERE member_id = %s;", (member_id,))
+                if cur.rowcount == 0:
+                    return False, "Member not found (nothing deleted)."
+
+                # Delete app_user row
+                cur.execute("DELETE FROM app_user WHERE user_id = %s;", (user_id,))
+
+        return True, "Member deleted successfully."
+    except Exception as ex:
+        return False, f"Error deleting member: {ex}"
+    finally:
+        conn.close()
+
 
 # ========== SIMPLE STATS FOR DASHBOARD ==========
 
