@@ -24,6 +24,8 @@ from Roots.daos import (
     count_books,
     count_active_loans,
     count_clubs,
+    get_top_borrowed_books,
+    get_top_active_members,
 )
 
 
@@ -50,6 +52,30 @@ def _make_tile(title: str, number: str, color: str) -> QWidget:
 
     layout.addWidget(header)
     layout.addWidget(value)
+
+    return frame
+
+
+def _make_list_panel(title: str, lines: list[str]) -> QWidget:
+    """
+    Small panel showing a title and a few lines (used for
+    'Most borrowed books' and 'Most active members').
+    """
+    frame = QFrame()
+    layout = QVBoxLayout(frame)
+    layout.setContentsMargins(8, 8, 8, 8)
+
+    header = QLabel(title)
+    header.setObjectName("SubtitleLabel")
+    layout.addWidget(header)
+
+    if not lines:
+        layout.addWidget(QLabel("No data yet."))
+    else:
+        for text in lines:
+            lbl = QLabel(text)
+            lbl.setWordWrap(True)
+            layout.addWidget(lbl)
 
     return frame
 
@@ -112,6 +138,31 @@ class LibrarianDashboard(QMainWindow):
         )
 
         layout.addLayout(tiles)
+
+        # -------------------------------------------------------------------
+        # NEW: Most borrowed books + Most active members (assignment feature)
+        # -------------------------------------------------------------------
+        top_books = get_top_borrowed_books(limit=3)
+        top_members = get_top_active_members(limit=3)
+
+        # Convert DB rows to simple strings
+        book_lines = [
+            f"{i}. {row['title']} ({row['borrow_count']} loans)"
+            for i, row in enumerate(top_books, start=1)
+        ]
+
+        member_lines = [
+            f"{i}. {row['full_name']} ({row['borrow_count']} loans)"
+            for i, row in enumerate(top_members, start=1)
+        ]
+
+        lists_row = QHBoxLayout()
+        lists_row.setSpacing(10)
+        lists_row.addWidget(_make_list_panel("Most borrowed books", book_lines))
+        lists_row.addWidget(_make_list_panel("Most active members", member_lines))
+
+        layout.addSpacing(10)
+        layout.addLayout(lists_row)
 
         # buttons row
         btn_row = QHBoxLayout()
@@ -205,7 +256,7 @@ class MemberDashboard(QMainWindow):
         my_loans = get_loans_for_member(self.member.member_id)
         my_loans_count = len(my_loans)
 
-        # NEW: simple reading progress based on completed loans
+        # simple reading progress based on completed loans
         completed_loans = sum(1 for loan in my_loans if loan.return_date is not None)
         if my_loans_count == 0:
             progress_percent = 0

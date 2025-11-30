@@ -552,9 +552,68 @@ def count_clubs() -> int:
     finally:
         conn.close()
 
+def get_top_borrowed_books(limit: int = 5) -> list[dict]:
+    """
+    For dashboard: books with the highest number of loans.
+
+    Returns rows like:
+      {"title": "...", "borrow_count": 7}
+    """
+    sql = """
+        SELECT
+            b.title,
+            COUNT(l.loan_id) AS borrow_count
+        FROM loan l
+        JOIN book b ON b.book_id = l.book_id
+        GROUP BY b.book_id, b.title
+        ORDER BY borrow_count DESC, b.title
+        LIMIT %s;
+    """
+
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(sql, (limit,))
+            rows = cur.fetchall()
+            return list(rows)
+    finally:
+        conn.close()
+
+
+def get_top_active_members(limit: int = 5) -> list[dict]:
+    """
+    For dashboard: members with the highest number of loans.
+
+    Returns rows like:
+      {"full_name": "...", "email": "...", "borrow_count": 7}
+    """
+    sql = """
+        SELECT
+            m.full_name,
+            m.email,
+            COUNT(l.loan_id) AS borrow_count
+        FROM member m
+        JOIN loan l ON l.member_id = m.member_id
+        GROUP BY m.member_id, m.full_name, m.email
+        ORDER BY borrow_count DESC, m.full_name
+        LIMIT %s;
+    """
+
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(sql, (limit,))
+            rows = cur.fetchall()
+            return list(rows)
+    finally:
+        conn.close()
+
+
+
+
 # ========== BOOK CLUBS ==========
 
-from typing import Dict  # (you already import typing at top, just be sure List, Optional are there)
+
 
 def list_all_clubs() -> List[dict]:
     """Return all clubs as simple dicts."""
