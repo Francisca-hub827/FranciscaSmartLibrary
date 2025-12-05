@@ -29,11 +29,10 @@ class User:
         self._user_id = user_id
         self._username = username
         self._role = role
-        # For librarians, full_name/email may be derived from username
         self._full_name = full_name or username
         self._email = email or username
 
-    # ---- properties (encapsulation) ----
+    # --- Encapsulated properties -----------------------------------------
 
     @property
     def user_id(self) -> int:
@@ -72,14 +71,17 @@ class User:
         return f"<User {self._user_id} ({self._role}): {self._full_name}>"
 
 
+# -------------------------------------------------------------------------
+# LIBRARIAN
+# -------------------------------------------------------------------------
+
 class Librarian(User):
     """
     Librarian = user with role 'LIBRARIAN'.
-    In DB: only in app_user (no separate librarian table).
+    Stored only in app_user (no separate librarian table).
     """
 
     def __init__(self, user_id: int, username: str, full_name: Optional[str] = None):
-        # full_name may be friendly label for display
         super().__init__(
             user_id=user_id,
             username=username,
@@ -88,17 +90,21 @@ class Librarian(User):
             email=username,
         )
 
-    def can_manage_inventory(self: bool):
+    def can_manage_inventory(self) -> bool:
         return True
 
     def __repr__(self) -> str:
         return f"<Librarian {self.user_id}: {self.full_name}>"
 
 
+# -------------------------------------------------------------------------
+# MEMBER
+# -------------------------------------------------------------------------
+
 class Member(User):
     """
     Member = app_user row with role 'MEMBER'
-    + linked row in member table (member_id, full_name, email).
+    + corresponding row in member table.
     """
 
     def __init__(
@@ -129,14 +135,13 @@ class Member(User):
         return f"<Member {self.member_id}: {self.full_name}>"
 
 
+# -------------------------------------------------------------------------
+# BOOK
+# -------------------------------------------------------------------------
+
 class Book:
     """
     Represents a row from book JOIN author.
-
-    book table:
-      book_id, isbn, title, author_id, genre, total_copies, available_copies
-    author table:
-      author_id, name
     """
 
     def __init__(
@@ -225,6 +230,10 @@ class Book:
             f"({self.available_copies}/{self.total_copies} available)>"
         )
 
+
+# -------------------------------------------------------------------------
+# LOAN
+# -------------------------------------------------------------------------
 
 class Loan:
     """

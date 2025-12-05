@@ -140,19 +140,20 @@ class LibrarianDashboard(QMainWindow):
         layout.addLayout(tiles)
 
         # -------------------------------------------------------------------
-        # NEW: Most borrowed books + Most active members (assignment feature)
+        # Most borrowed books + Most active members
         # -------------------------------------------------------------------
         top_books = get_top_borrowed_books(limit=3)
         top_members = get_top_active_members(limit=3)
 
-        # Convert DB rows to simple strings
         book_lines = [
             f"{i}. {row['title']} ({row['borrow_count']} loans)"
             for i, row in enumerate(top_books, start=1)
         ]
 
+        # NOTE: get_top_active_members currently returns loan_count,
+        # but on the dashboard we display it as "borrow_count" for consistency.
         member_lines = [
-            f"{i}. {row['full_name']} ({row['borrow_count']} loans)"
+            f"{i}. {row['full_name']} ({row.get('borrow_count', row.get('loan_count', 0))} loans)"
             for i, row in enumerate(top_members, start=1)
         ]
 
@@ -197,7 +198,7 @@ class LibrarianDashboard(QMainWindow):
         self.btn_members.clicked.connect(self._open_members)
         self.btn_loans.clicked.connect(self._open_loans)
         self.btn_clubs.clicked.connect(self._open_clubs)
-        self.btn_logout.clicked.connect(self.close)
+        self.btn_logout.clicked.connect(self._logout)
 
     # --- button handlers ---------------------------------------------------
 
@@ -216,6 +217,14 @@ class LibrarianDashboard(QMainWindow):
     def _open_clubs(self):
         dlg = LibrarianClubsWindow(self)
         dlg.exec_()
+
+    def _logout(self):
+        """
+        Close dashboard and return to login screen (role selection).
+        """
+        from .app import after_splash  # imported here to avoid circular imports
+        self.close()
+        after_splash()
 
 
 # ---------------------------------------------------------------------------
@@ -306,7 +315,7 @@ class MemberDashboard(QMainWindow):
         self.btn_view_books.clicked.connect(self._open_books_readonly)
         self.btn_my_loans.clicked.connect(self._info_loans)
         self.btn_my_clubs.clicked.connect(self._open_member_clubs)
-        self.btn_logout.clicked.connect(self.close)
+        self.btn_logout.clicked.connect(self._logout)
 
     # --- button handlers ---------------------------------------------------
 
@@ -315,11 +324,11 @@ class MemberDashboard(QMainWindow):
         Opens the Books window in read-only mode for members.
         They can browse but not add/edit/delete.
         """
-        dlg = BooksWindow(self, librarian_name=self.member.full_name)
-        # disable editing for members
-        dlg.btn_add.setDisabled(True)
-        dlg.btn_edit.setDisabled(True)
-        dlg.btn_delete.setDisabled(True)
+        dlg = BooksWindow(
+            self,
+            librarian_name=self.member.full_name,
+            member=self.member,  # tells BooksWindow this is a member view
+        )
         dlg.setWindowTitle("Books catalogue - Francisca SmartLibrary")
         dlg.exec_()
 
@@ -331,6 +340,14 @@ class MemberDashboard(QMainWindow):
     def _open_member_clubs(self):
         dlg = MemberClubsWindow(self, member=self.member)
         dlg.exec_()
+
+    def _logout(self):
+        """
+        Close member dashboard and return to login screen (role selection).
+        """
+        from .app import after_splash  # avoid circular import at module import time
+        self.close()
+        after_splash()
 
     # --- reminder when books are nearly due -------------------------------
 

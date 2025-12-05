@@ -1,5 +1,4 @@
-# loan_window.py
-# Librarian loan management window for Francisca SmartLibrary
+# Librarian / Member loan management window for Francisca SmartLibrary
 
 from PyQt5.QtWidgets import (
     QDialog,
@@ -15,10 +14,12 @@ from PyQt5.QtWidgets import (
 )
 
 from .style import apply_base_style
+from Roots.models import Member
 from Roots.daos import (
     find_member_by_email,
     find_book_by_isbn,
     list_all_loans,
+    get_loans_for_member,
     return_book,
     borrow_book_by_email_and_isbn,
     count_active_loans,
@@ -27,20 +28,26 @@ from Roots.daos import (
 
 class LoansWindow(QDialog):
     """
-    Admin loan management for librarians.
+    Loan management window.
 
-    Features:
-    - Enter member email + book ISBN to borrow on behalf of a member.
-    - Select any row and click 'Return book' to mark it returned.
-    - Table shows all loans with member, book, dates and status.
-    - Sort by newest / oldest / due date.
-    - Shows active loans count at the bottom.
+    - When opened from the LIBRARIAN dashboard (member=None):
+        * shows ALL loans
+        * librarian can borrow for any member using email + ISBN.
+    - When opened from the MEMBER dashboard (member is a Member object):
+        * shows ONLY that member's loans
+        * email field is locked to the logged-in member
+        * member can only borrow books for themselves.
     """
 
-    def __init__(self, parent=None, member=None):
+    def __init__(self, parent=None, member: Member | None = None):
         super().__init__(parent)
         self.member = member
-        self.setWindowTitle("Loans management - Francisca SmartLibrary")
+
+        if self.member is not None:
+            self.setWindowTitle("My loans - Francisca SmartLibrary")
+        else:
+            self.setWindowTitle("Loans management - Francisca SmartLibrary")
+
         self.resize(900, 500)
 
         layout = QVBoxLayout(self)
@@ -59,6 +66,12 @@ class LoansWindow(QDialog):
         subtitle.setObjectName("SubtitleLabel")
         layout.addWidget(subtitle)
 
+        # If this is the member's own "My loans" view, adjust subtitle
+        if self.member is not None:
+            subtitle.setText(
+                "Borrow and return books for your own account only."
+            )
+
         # ---- Input row: member email + book ISBN ----
         inputs = QHBoxLayout()
 
@@ -72,6 +85,14 @@ class LoansWindow(QDialog):
         inputs.addWidget(self.book_isbn_input)
 
         layout.addLayout(inputs)
+
+        # If opened for a specific member, lock the email field to that member
+        if self.member is not None:
+            self.member_email_input.setText(self.member.email)
+            self.member_email_input.setReadOnly(True)
+            self.member_email_input.setToolTip(
+                "You are logged in as this member. Loans will be created for this account."
+            )
 
         # ---- Actions row: borrow / return / sort / refresh ----
         actions = QHBoxLayout()
@@ -118,7 +139,6 @@ class LoansWindow(QDialog):
         self.lbl_active = QLabel("")
         footer.addWidget(self.lbl_active)
         footer.addStretch(1)
-
         layout.addLayout(footer)
 
         apply_base_style(self)
@@ -160,11 +180,17 @@ class LoansWindow(QDialog):
 
     def load_loans_table(self):
         """
-        Load all loans from the database into the table,
-        using the selected sort order.
+        Load loans into the table.
+
+        - Librarian: all loans, with chosen sort order.
+        - Member: only this member's loans.
         """
-        order_by = self._current_order_by()
-        loans = list_all_loans(order_by=order_by)
+        if self.member is not None:
+            # Member view – only their own loans
+            loans = get_loans_for_member(self.member.member_id)
+        else:
+            order_by = self._current_order_by()
+            loans = list_all_loans(order_by=order_by)
 
         self.table.setRowCount(len(loans))
 
@@ -190,26 +216,45 @@ class LoansWindow(QDialog):
                 self.table.setItem(row_index, col, item)
 
         # Update active loans label
-        active = count_active_loans()
-        self.lbl_active.setText(f"Active loans: {active}")
+        if self.member is not None:
+            active = sum(1 for loan in loans if loan.return_date is None)
+            self.lbl_active.setText(f"Your active loans: {active}")
+        else:
+            active = count_active_loans()
+            self.lbl_active.setText(f"Active loans: {active}")
 
     # ------------------- Actions -------------------
 
     def _on_borrow_for_member(self):
         """
-        Librarian borrows a book for a member, using email + ISBN.
-        """
-        email = self.member_email_input.text().strip()
-        isbn = self.book_isbn_input.text().strip()
+        Borrow a book.
 
-        if not email or not isbn:
+        - Librarian mode: type member email + book ISBN.
+        - Member mode: email is locked to the logged-in member.
+        """
+        isbn = self.book_isbn_input.text().strip()
+        if not isbn:
             QMessageBox.warning(
                 self,
                 "Input error",
-                "Please enter both member email and book ISBN.",
+                "Please enter the book ISBN.",
             )
             return
 
+        # Determine which email to use
+        if self.member is not None:
+            email = self.member.email.strip().lower()
+        else:
+            email = self.member_email_input.text().strip()
+            if not email:
+                QMessageBox.warning(
+                    self,
+                    "Input error",
+                    "Please enter the member email.",
+                )
+                return
+
+        # Check that member exists (librarian mode mainly; in member mode it should always exist)
         member = find_member_by_email(email)
         if member is None:
             QMessageBox.warning(
@@ -219,6 +264,7 @@ class LoansWindow(QDialog):
             )
             return
 
+        # Check that book exists
         book = find_book_by_isbn(isbn)
         if book is None:
             QMessageBox.warning(
@@ -228,6 +274,7 @@ class LoansWindow(QDialog):
             )
             return
 
+        # Now perform borrow via DAO helper
         success, msg = borrow_book_by_email_and_isbn(email, isbn)
 
         if success:

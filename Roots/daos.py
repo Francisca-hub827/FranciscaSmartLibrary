@@ -11,11 +11,11 @@ Schema (from your script):
 We use pgcrypto's crypt() for password checking.
 """
 
-from datetime import date, timedelta
+
 from typing import List, Optional
 
 import psycopg2
-from psycopg2.extras import RealDictCursor
+
 
 from .models import Librarian, Member, Book, Loan
 
@@ -1097,48 +1097,6 @@ def list_all_loans(order_by: str = "newest") -> List[Loan]:
 
     return loans
 
-
-
-
-def find_book_by_isbn(isbn: str) -> Optional[Book]:
-    """
-    Look up a book by ISBN.
-    Returns a Book object or None.
-    """
-    isbn = isbn.strip()
-    sql = """
-        SELECT
-            b.book_id,
-            b.isbn,
-            b.title,
-            b.genre,
-            b.total_copies,
-            b.available_copies,
-            a.name AS author_name
-        FROM book b
-        JOIN author a ON a.author_id = b.author_id
-        WHERE b.isbn = %s;
-    """
-
-    conn = get_connection()
-    try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(sql, (isbn,))
-            row = cur.fetchone()
-            if not row:
-                return None
-
-            return Book(
-                book_id=row["book_id"],
-                isbn=row["isbn"],
-                title=row["title"],
-                author_name=row["author_name"],
-                genre=row["genre"],
-                total_copies=row["total_copies"],
-                available_copies=row["available_copies"],
-            )
-    finally:
-        conn.close()
 
 
 def list_loans(order_by: str = "newest") -> List[Loan]:
