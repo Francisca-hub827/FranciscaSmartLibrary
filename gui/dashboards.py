@@ -1,3 +1,5 @@
+import os  # for path to background image
+
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QMainWindow,
@@ -9,6 +11,8 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QMessageBox,
     QFrame,
+    QDialog,
+    QSizePolicy,   # NEW: to make cards expand nicely
 )
 
 from .style import apply_base_style, ORANGE, TEAL
@@ -17,16 +21,48 @@ from .books_window import BooksWindow
 from .member_window import MembersWindow
 from .loan_window import LoansWindow
 from .club_window import LibrarianClubsWindow, MemberClubsWindow
-from Roots.daos import (
-    get_due_soon_loans_for_member,
-    get_loans_for_member,
-    count_members,
-    count_books,
-    count_active_loans,
-    count_clubs,
-    get_top_borrowed_books,
-    get_top_active_members,
-)
+from .login import LoginWindow  # used for logout → back to login
+
+
+# ---------------------------------------------------------------------------
+# Background helper – apply image behind dashboard content
+# ---------------------------------------------------------------------------
+
+# relative to THIS file (dashboard.py is in gui/, image is in gui/assets/)
+DASHBOARD_BG_RELATIVE = "assets/library_bg.jpg"
+
+
+def _set_dashboard_background(widget: QWidget, image_relative: str = DASHBOARD_BG_RELATIVE):
+    """
+    Apply a stretched background image to the given widget using a stylesheet.
+
+    Looks for the image at: <folder_of_this_file> / image_relative
+    In your case: gui/assets/library_bg.jpg
+
+    If the image is missing, it silently does nothing.
+    """
+    base_dir = os.path.dirname(os.path.abspath(__file__))  # .../gui
+    image_path = os.path.join(base_dir, image_relative)    # .../gui/assets/library_bg.jpg
+
+    if not os.path.exists(image_path):
+        # Optional: uncomment to debug if needed
+        # print(f"[dashboard] Background image not found: {image_path}")
+        return
+
+    # Use forward slashes so Qt is happy on Windows too
+    image_path = image_path.replace("\\", "/")
+
+    # Ensure widget has an object name so the selector works
+    if not widget.objectName():
+        widget.setObjectName("DashboardCentral")
+
+    widget.setStyleSheet(
+        f"""
+        #{widget.objectName()} {{
+            border-image: url('{image_path}') 0 0 0 0 stretch stretch;
+        }}
+        """
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -46,8 +82,9 @@ def _make_tile(title: str, number: str, color: str) -> QWidget:
     header.setObjectName("SubtitleLabel")
 
     value = QLabel(number)
+    # Slightly bigger numbers so they are readable on large screens
     value.setStyleSheet(
-        f"font-size: 18px; font-weight: 700; color: {color};"
+        f"font-size: 22px; font-weight: 700; color: {color};"
     )
 
     layout.addWidget(header)
@@ -81,6 +118,46 @@ def _make_list_panel(title: str, lines: list[str]) -> QWidget:
 
 
 # ---------------------------------------------------------------------------
+# Shared helper for logout → go back to login
+# ---------------------------------------------------------------------------
+
+def _perform_logout_and_relogin(current_window: QMainWindow):
+    """
+    Close the current dashboard and go back to the login screen.
+
+    Flow:
+      1. Show LoginWindow again.
+      2. If user logs in:
+           - If librarian → open LibrarianDashboard
+           - If member    → open MemberDashboard
+      3. Close the old dashboard.
+    """
+    login = LoginWindow(current_window)
+    # clear old values for a fresh feeling
+    login.email_edit.clear()
+    login.password_edit.clear()
+
+    result = login.exec_()
+    user = getattr(login, "logged_in_user", None)
+
+    if result == QDialog.Accepted and user is not None:
+        if login.role == "librarian" and isinstance(user, Librarian):
+            new_window = LibrarianDashboard(user)
+            new_window.show()
+        elif login.role == "member" and isinstance(user, Member):
+            new_window = MemberDashboard(user)
+            new_window.show()
+        else:
+            QMessageBox.warning(
+                current_window,
+                "Login error",
+                "Your account role did not match any dashboard.",
+            )
+
+    current_window.close()
+
+
+# ---------------------------------------------------------------------------
 # Librarian dashboard (admin view)
 # ---------------------------------------------------------------------------
 
@@ -96,8 +173,8 @@ class LibrarianDashboard(QMainWindow):
         self.setWindowTitle("Francisca SmartLibrary - Librarian Dashboard")
         self.resize(900, 520)
 
-        # central layout
         central = QWidget()
+        central.setObjectName("LibrarianDashboardCentral")  # for background style
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
         layout.setContentsMargins(20, 20, 20, 20)
@@ -140,7 +217,7 @@ class LibrarianDashboard(QMainWindow):
         layout.addLayout(tiles)
 
         # -------------------------------------------------------------------
-        # Most borrowed books + Most active members
+        # Most borrowed books + Most active members (assignment feature)
         # -------------------------------------------------------------------
         top_books = get_top_borrowed_books(limit=3)
         top_members = get_top_active_members(limit=3)
@@ -150,10 +227,8 @@ class LibrarianDashboard(QMainWindow):
             for i, row in enumerate(top_books, start=1)
         ]
 
-        # NOTE: get_top_active_members currently returns loan_count,
-        # but on the dashboard we display it as "borrow_count" for consistency.
         member_lines = [
-            f"{i}. {row['full_name']} ({row.get('borrow_count', row.get('loan_count', 0))} loans)"
+            f"{i}. {row['full_name']} ({row['borrow_count']} loans)"
             for i, row in enumerate(top_members, start=1)
         ]
 
@@ -189,6 +264,8 @@ class LibrarianDashboard(QMainWindow):
         layout.addWidget(self.btn_logout, alignment=Qt.AlignRight)
 
         apply_base_style(self)
+        _set_dashboard_background(self.centralWidget())  # background
+
         self._connect()
 
     # --- signal wiring -----------------------------------------------------
@@ -198,7 +275,11 @@ class LibrarianDashboard(QMainWindow):
         self.btn_members.clicked.connect(self._open_members)
         self.btn_loans.clicked.connect(self._open_loans)
         self.btn_clubs.clicked.connect(self._open_clubs)
-        self.btn_logout.clicked.connect(self._logout)
+
+        # go back to login instead of just closing the app
+        self.btn_logout.clicked.connect(
+            lambda: _perform_logout_and_relogin(self)
+        )
 
     # --- button handlers ---------------------------------------------------
 
@@ -218,14 +299,6 @@ class LibrarianDashboard(QMainWindow):
         dlg = LibrarianClubsWindow(self)
         dlg.exec_()
 
-    def _logout(self):
-        """
-        Close dashboard and return to login screen (role selection).
-        """
-        from .app import after_splash  # imported here to avoid circular imports
-        self.close()
-        after_splash()
-
 
 # ---------------------------------------------------------------------------
 # Member dashboard (normal user view)
@@ -243,69 +316,158 @@ class MemberDashboard(QMainWindow):
         super().__init__()
 
         self.member = member
+        self.setObjectName("MemberDashboard")
         self.setWindowTitle("Francisca SmartLibrary - Member Dashboard")
-        self.resize(800, 480)
+        self.resize(900, 520)
 
         central = QWidget()
+        central.setObjectName("MemberDashboardCentral")
+        # Let the background image show through
+        central.setStyleSheet("background: transparent;")
         self.setCentralWidget(central)
+
         layout = QVBoxLayout(central)
         layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(10)
+        layout.setSpacing(12)
+
+        # --------------------------------------------------
+        # HERO BANNER (like the top of the Pinterest design)
+        # --------------------------------------------------
+        hero = QFrame()
+        hero.setObjectName("MemberHero")
+        hero.setStyleSheet(
+            """
+            QFrame#MemberHero {
+                background: rgba(0, 0, 0, 0.55);   /* dark overlay */
+                border-radius: 8px;
+                color: white;
+            }
+            """
+        )
+        hero_layout = QVBoxLayout(hero)
+        hero_layout.setContentsMargins(16, 10, 16, 12)
+        hero_layout.setSpacing(4)
 
         title = QLabel(f"Welcome, {self.member.full_name}")
-        title.setObjectName("TitleLabel")
+        # big clear heading
+        title.setStyleSheet("font-size: 26px; font-weight: 800;")
+        subtitle = QLabel("Browse books, track your reading and join clubs.")
+        subtitle.setStyleSheet("font-size: 15px;")
 
-        subtitle = QLabel("Browse books, view your loans and clubs.")
-        subtitle.setObjectName("SubtitleLabel")
+        hero_layout.addWidget(title)
+        hero_layout.addWidget(subtitle)
 
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
+        layout.addWidget(hero)
 
-        # my loans count from DB
+        # --- stats for this member ---
         my_loans = get_loans_for_member(self.member.member_id)
         my_loans_count = len(my_loans)
 
-        # simple reading progress based on completed loans
         completed_loans = sum(1 for loan in my_loans if loan.return_date is not None)
         if my_loans_count == 0:
             progress_percent = 0
         else:
             progress_percent = round(completed_loans / my_loans_count * 100)
 
-        tiles = QGridLayout()
-        tiles.setSpacing(10)
+        # demo numbers
+        reserved_count = 1
+        clubs_joined = 2
 
-        # top row of tiles
-        tiles.addWidget(_make_tile("My loans", str(my_loans_count), ORANGE), 0, 0)
-        tiles.addWidget(_make_tile("Reserved books", "1", TEAL), 0, 1)
-        tiles.addWidget(_make_tile("Clubs joined", "2", ORANGE), 0, 2)
+        # --------------------------------------
+        # MAIN CONTENT: left stats, right actions
+        # white cards like Pinterest example
+        # --------------------------------------
+        content_row = QHBoxLayout()
+        content_row.setSpacing(16)
 
-        # second row: reading progress (spans all 3 columns)
-        tiles.addWidget(
-            _make_tile("Reading progress", f"{progress_percent}%", TEAL),
-            1, 0, 1, 3
+        # LEFT CARD – stats
+        left_card = QFrame()
+        left_card.setObjectName("MemberStatsCard")
+        left_card.setStyleSheet(
+            """
+            QFrame#MemberStatsCard {
+                background: rgba(255, 255, 255, 0.92);
+                border-radius: 8px;
+            }
+            """
+        )
+        left_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        left_layout = QVBoxLayout(left_card)
+        left_layout.setContentsMargins(16, 14, 16, 14)
+        left_layout.setSpacing(10)
+
+        stats_title = QLabel("Your library at a glance")
+        stats_title.setStyleSheet("font-size: 18px; font-weight: 800;")
+        left_layout.addWidget(stats_title)
+
+        stats_grid = QGridLayout()
+        stats_grid.setSpacing(14)
+
+        stats_grid.addWidget(
+            _make_tile("My loans", str(my_loans_count), "#1f6feb"), 0, 0
+        )
+        stats_grid.addWidget(
+            _make_tile("Reserved books", str(reserved_count), "#15998e"), 0, 1
+        )
+        stats_grid.addWidget(
+            _make_tile("Clubs joined", str(clubs_joined), "#2563eb"), 1, 0
+        )
+        stats_grid.addWidget(
+            _make_tile("Reading progress", f"{progress_percent}%", "#14b8a6"),
+            1, 1
         )
 
-        layout.addLayout(tiles)
+        left_layout.addLayout(stats_grid)
 
-        # buttons
-        btn_row = QHBoxLayout()
-        self.btn_view_books = QPushButton("View books")
-        self.btn_my_loans = QPushButton("My loans")
-        self.btn_my_clubs = QPushButton("My clubs")
+        # RIGHT CARD – quick actions
+        right_card = QFrame()
+        right_card.setObjectName("MemberShortcutsCard")
+        right_card.setStyleSheet(
+            """
+            QFrame#MemberShortcutsCard {
+                background: rgba(255, 255, 255, 0.95);
+                border-radius: 8px;
+            }
+            """
+        )
+        right_card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+
+        right_layout = QVBoxLayout(right_card)
+        right_layout.setContentsMargins(16, 14, 16, 14)
+        right_layout.setSpacing(12)
+
+        shortcuts_title = QLabel("Quick actions")
+        shortcuts_title.setStyleSheet("font-size: 17px; font-weight: 700;")
+        right_layout.addWidget(shortcuts_title)
+
+        self.btn_view_books = QPushButton("Browse books catalogue")
+        self.btn_my_loans = QPushButton("View my loans")
+        self.btn_my_clubs = QPushButton("My clubs & memberships")
         self.btn_logout = QPushButton("Logout")
         self.btn_logout.setObjectName("Secondary")
 
         for btn in [self.btn_view_books, self.btn_my_loans, self.btn_my_clubs]:
-            btn.setMinimumHeight(40)
-            btn_row.addWidget(btn)
+            btn.setMinimumHeight(52)
+            btn.setCursor(Qt.PointingHandCursor)
+            # bigger button text like the Pinterest call-to-actions
+            btn.setStyleSheet("font-size: 15px; font-weight: 600;")
+            right_layout.addWidget(btn)
 
-        layout.addSpacing(10)
-        layout.addLayout(btn_row)
-        layout.addStretch(1)
+        right_layout.addStretch(1)
+
+        content_row.addWidget(left_card, 3)
+        content_row.addWidget(right_card, 2)
+
+        layout.addLayout(content_row)
+
+        # Logout bottom right
+        layout.addSpacing(6)
         layout.addWidget(self.btn_logout, alignment=Qt.AlignRight)
 
         apply_base_style(self)
+        _set_dashboard_background(self.centralWidget())  # keep your photo
+
         self._connect()
         self._show_due_soon_reminder()
 
@@ -315,7 +477,10 @@ class MemberDashboard(QMainWindow):
         self.btn_view_books.clicked.connect(self._open_books_readonly)
         self.btn_my_loans.clicked.connect(self._info_loans)
         self.btn_my_clubs.clicked.connect(self._open_member_clubs)
-        self.btn_logout.clicked.connect(self._logout)
+
+        self.btn_logout.clicked.connect(
+            lambda: _perform_logout_and_relogin(self)
+        )
 
     # --- button handlers ---------------------------------------------------
 
@@ -324,11 +489,10 @@ class MemberDashboard(QMainWindow):
         Opens the Books window in read-only mode for members.
         They can browse but not add/edit/delete.
         """
-        dlg = BooksWindow(
-            self,
-            librarian_name=self.member.full_name,
-            member=self.member,  # tells BooksWindow this is a member view
-        )
+        dlg = BooksWindow(self, librarian_name=self.member.full_name)
+        dlg.btn_add.setDisabled(True)
+        dlg.btn_edit.setDisabled(True)
+        dlg.btn_delete.setDisabled(True)
         dlg.setWindowTitle("Books catalogue - Francisca SmartLibrary")
         dlg.exec_()
 
@@ -340,14 +504,6 @@ class MemberDashboard(QMainWindow):
     def _open_member_clubs(self):
         dlg = MemberClubsWindow(self, member=self.member)
         dlg.exec_()
-
-    def _logout(self):
-        """
-        Close member dashboard and return to login screen (role selection).
-        """
-        from .app import after_splash  # avoid circular import at module import time
-        self.close()
-        after_splash()
 
     # --- reminder when books are nearly due -------------------------------
 
@@ -372,3 +528,19 @@ class MemberDashboard(QMainWindow):
         )
 
         QMessageBox.information(self, "Friendly reminder", msg)
+
+
+# ---------------------------------------------------------------------------
+# DAO imports at the bottom (to avoid circular issues in some setups)
+# ---------------------------------------------------------------------------
+
+from Roots.daos import (
+    get_due_soon_loans_for_member,
+    get_loans_for_member,
+    count_members,
+    count_books,
+    count_active_loans,
+    count_clubs,
+    get_top_borrowed_books,
+    get_top_active_members,
+)
