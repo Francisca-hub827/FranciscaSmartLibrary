@@ -1,3 +1,4 @@
+This branch (feature/login) is used for login-related changes for the SmartLibrary
 # Francisca SmartLibrary
 
 SmartLibrary is a desktop library application built for Limkokwing University – Sierra Leone.  
