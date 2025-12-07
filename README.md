@@ -38,5 +38,7 @@ Run the application (example if gui/app.py is the entry point):
 
 python -m gui.app
 
+(Small change to trigger Project CI GitHub Actions)
+
 
 
