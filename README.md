@@ -39,5 +39,5 @@ Run the application (example if gui/app.py is the entry point):
 
 python -m gui.app
 
-
+(Small change after fixing GitHub Actions workflow filename.)
 
