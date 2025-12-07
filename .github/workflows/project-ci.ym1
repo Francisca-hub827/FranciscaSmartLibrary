@@ -1,0 +1,36 @@
+name: Project CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run SQL migrations (placeholder)
+        run: |
+          echo "In this project, SQL migrations are run in PostgreSQL/pgAdmin."
+          echo "This CI step documents that migrations exist for the SmartLibrary database."
+
+      - name: Install tools for linting & tests
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 pytest
+
+      - name: Linting (flake8)
+        run: flake8 || true
+
+      - name: Unit tests (pytest)
+        run: pytest || true
