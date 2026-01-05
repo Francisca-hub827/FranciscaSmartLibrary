@@ -1,7 +1,7 @@
 # login.py
 
 import os
-
+import random
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
@@ -11,6 +11,13 @@ from PyQt5.QtWidgets import (
 
 from .style import apply_base_style
 from Roots.daos import authenticate_librarian, authenticate_member
+
+MOTIVATION_LINES = [
+    "Sign in and let your next chapter begin.",
+    "Stories, notes and smart loans – all in one place.",
+    "Welcome back – your books missed you.",
+    "Today is a good day to finish a chapter.",
+]
 
 
 class LoginWindow(QDialog):
@@ -64,9 +71,13 @@ class LoginWindow(QDialog):
         title.setObjectName("TitleLabel")
         title.setAlignment(Qt.AlignHCenter)
 
-        subtitle = QLabel("Sign in as Librarian (admin) or Member (user).")
+        subtitle_text = random.choice(MOTIVATION_LINES)
+        subtitle = QLabel(
+            subtitle_text + "\nSign in as Librarian (admin) or Member (user)."
+        )
         subtitle.setObjectName("SubtitleLabel")
         subtitle.setAlignment(Qt.AlignHCenter)
+
 
         overlay.addWidget(title)
         overlay.addWidget(subtitle)

@@ -21,7 +21,98 @@ from Roots.daos import (
     list_clubs_for_member,
     list_clubs_not_joined,
     find_member_by_email,
+    create_club_join_request,
+    list_pending_club_requests,
+    review_club_join_request,
 )
+
+
+class ClubRequestsDialog(QDialog):
+    """
+    Librarian view: review pending club join requests.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Club join requests")
+        self.resize(700, 400)
+
+        layout = QVBoxLayout(self)
+
+        title = QLabel("Pending club join requests")
+        title.setObjectName("TitleLabel")
+        layout.addWidget(title)
+
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(
+            ["Request ID", "Member", "Email", "Club", "Requested on"]
+        )
+        self.table.setSelectionBehavior(self.table.SelectRows)
+        self.table.setSelectionMode(self.table.SingleSelection)
+        self.table.setEditTriggers(self.table.NoEditTriggers)
+        layout.addWidget(self.table)
+
+        btn_row = QHBoxLayout()
+        self.btn_approve = QPushButton("Approve")
+        self.btn_reject = QPushButton("Reject")
+        self.btn_close = QPushButton("Close")
+        btn_row.addWidget(self.btn_approve)
+        btn_row.addWidget(self.btn_reject)
+        btn_row.addStretch(1)
+        btn_row.addWidget(self.btn_close)
+        layout.addLayout(btn_row)
+
+        apply_base_style(self)
+        self._connect()
+        self._load_requests()
+
+    def _connect(self):
+        self.btn_close.clicked.connect(self.close)
+        self.btn_approve.clicked.connect(lambda: self._handle_review(True))
+        self.btn_reject.clicked.connect(lambda: self._handle_review(False))
+
+    def _load_requests(self):
+        requests = list_pending_club_requests()
+        self.table.setRowCount(len(requests))
+
+        for row, r in enumerate(requests):
+            values = [
+                str(r["request_id"]),
+                r["full_name"],
+                r["email"],
+                r["club_name"],
+                str(r["created_at"]),
+            ]
+            for col, val in enumerate(values):
+                self.table.setItem(row, col, QTableWidgetItem(val))
+
+        self.table.resizeColumnsToContents()
+
+    def _selected_request_id(self) -> int | None:
+        indexes = self.table.selectionModel().selectedRows()
+        if not indexes:
+            return None
+        row = indexes[0].row()
+        item = self.table.item(row, 0)
+        if not item:
+            return None
+        try:
+            return int(item.text())
+        except ValueError:
+            return None
+
+    def _handle_review(self, approve: bool):
+        request_id = self._selected_request_id()
+        if request_id is None:
+            QMessageBox.warning(self, "No selection", "Select a request first.")
+            return
+
+        ok, msg = review_club_join_request(request_id, approve)
+        if ok:
+            QMessageBox.information(self, "Join request", msg)
+            self._load_requests()
+        else:
+            QMessageBox.warning(self, "Join request", msg)
 
 
 # -------------------------------
@@ -67,6 +158,7 @@ class LibrarianClubsWindow(QDialog):
         self.delete_club_btn = QPushButton("Delete club")
         self.add_member_btn = QPushButton("Add member to club")
         self.remove_member_btn = QPushButton("Remove member")
+        self.review_requests_btn = QPushButton("Review join requests")
         self.refresh_btn = QPushButton("Refresh")
         self.close_btn = QPushButton("Close")
 
@@ -75,9 +167,11 @@ class LibrarianClubsWindow(QDialog):
         btn_row.addStretch(1)
         btn_row.addWidget(self.add_member_btn)
         btn_row.addWidget(self.remove_member_btn)
+        btn_row.addWidget(self.review_requests_btn)
         btn_row.addStretch(1)
         btn_row.addWidget(self.refresh_btn)
         btn_row.addWidget(self.close_btn)
+
 
         layout.addLayout(btn_row)
 
@@ -91,8 +185,10 @@ class LibrarianClubsWindow(QDialog):
         self.delete_club_btn.clicked.connect(self._on_delete_club)
         self.add_member_btn.clicked.connect(self._on_add_member)
         self.remove_member_btn.clicked.connect(self._on_remove_member)
+        self.review_requests_btn.clicked.connect(self._on_open_requests)
         self.refresh_btn.clicked.connect(self.load_data)
         self.close_btn.clicked.connect(self.close)
+
 
         # initial load
         self.load_data()
@@ -226,6 +322,11 @@ class LibrarianClubsWindow(QDialog):
         else:
             QMessageBox.warning(self, "Could not remove", msg)
 
+    def _on_open_requests(self):
+        dlg = ClubRequestsDialog(self)
+        dlg.exec_()
+
+
 
 # -------------------------------
 # 2) Member clubs window
@@ -250,14 +351,14 @@ class MemberClubsWindow(QDialog):
         center = QHBoxLayout()
 
         # left: clubs they can join
-        self.available_table = QTableWidget(0, 2)
-        self.available_table.setHorizontalHeaderLabels(["Club ID", "Club name"])
+        self.available_table = QTableWidget(0, 3)
+        self.available_table.setHorizontalHeaderLabels(["Club ID", "Club name", "Description"])
         self.available_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.available_table.setSelectionMode(QTableWidget.SingleSelection)
 
         # right: clubs they are already in
-        self.my_table = QTableWidget(0, 2)
-        self.my_table.setHorizontalHeaderLabels(["Club ID", "Club name"])
+        self.my_table = QTableWidget(0, 3)
+        self.my_table.setHorizontalHeaderLabels(["Club ID", "Club name", "Description"])
         self.my_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.my_table.setSelectionMode(QTableWidget.SingleSelection)
 
@@ -265,6 +366,12 @@ class MemberClubsWindow(QDialog):
         center.addWidget(self.my_table, 1)
 
         layout.addLayout(center)
+
+        # details label under the tables
+        self.club_details_label = QLabel("Select a club to see its description.")
+        self.club_details_label.setWordWrap(True)
+        layout.addWidget(self.club_details_label)
+
 
         # buttons
         btn_row = QHBoxLayout()
@@ -287,6 +394,15 @@ class MemberClubsWindow(QDialog):
         self.close_btn.clicked.connect(self.close)
 
         self.load_data()
+
+        # update description when selection changes
+        self.available_table.selectionModel().selectionChanged.connect(
+            lambda *_: self._update_club_description(self.available_table)
+        )
+        self.my_table.selectionModel().selectionChanged.connect(
+            lambda *_: self._update_club_description(self.my_table)
+        )
+
 
     # helpers
 
@@ -315,6 +431,7 @@ class MemberClubsWindow(QDialog):
         for r, c in enumerate(avail):
             self.available_table.setItem(r, 0, QTableWidgetItem(str(c["club_id"])))
             self.available_table.setItem(r, 1, QTableWidgetItem(c["name"]))
+            self.available_table.setItem(r, 2, QTableWidgetItem(c.get("description") or ""))
         self.available_table.resizeColumnsToContents()
 
         # my clubs
@@ -322,7 +439,9 @@ class MemberClubsWindow(QDialog):
         for r, c in enumerate(my):
             self.my_table.setItem(r, 0, QTableWidgetItem(str(c["club_id"])))
             self.my_table.setItem(r, 1, QTableWidgetItem(c["name"]))
+            self.my_table.setItem(r, 2, QTableWidgetItem(c.get("description") or ""))
         self.my_table.resizeColumnsToContents()
+
 
     # slots
 
@@ -332,12 +451,14 @@ class MemberClubsWindow(QDialog):
             QMessageBox.warning(self, "No selection", "Select a club to join.")
             return
 
-        success, msg = add_member_to_club(self.member.member_id, club_id)
+        success, msg = create_club_join_request(self.member.member_id, club_id)
         if success:
-            QMessageBox.information(self, "Joined", msg)
+            QMessageBox.information(self, "Request sent", msg)
+            # optional: reload tables so this club disappears from "available"
             self.load_data()
         else:
-            QMessageBox.warning(self, "Could not join", msg)
+            QMessageBox.warning(self, "Could not request", msg)
+
 
     def _on_leave(self):
         club_id = self._current_id_from_table(self.my_table)
@@ -351,3 +472,28 @@ class MemberClubsWindow(QDialog):
             self.load_data()
         else:
             QMessageBox.warning(self, "Could not leave", msg)
+
+
+    def _update_club_description(self, table: QTableWidget):
+        indexes = table.selectionModel().selectedRows()
+        if not indexes:
+            self.club_details_label.setText("Select a club to see its description.")
+            return
+
+        row = indexes[0].row()
+        id_item = table.item(row, 0)
+        name_item = table.item(row, 1)
+        desc_item = table.item(row, 2)
+
+        cid = id_item.text() if id_item else "?"
+        name = name_item.text() if name_item else "Unknown club"
+        desc = desc_item.text() if desc_item else ""
+
+        text = f"Club #{cid}: {name}"
+        if desc:
+            text += f"\nDescription: {desc}"
+        else:
+            text += "\nDescription: (no description provided)"
+
+        self.club_details_label.setText(text)
+

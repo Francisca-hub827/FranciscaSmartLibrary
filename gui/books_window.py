@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QMessageBox,
-    QInputDialog, QLineEdit
+    QInputDialog, QLineEdit, QComboBox
 )
 
 from .style import apply_base_style
@@ -47,24 +47,36 @@ class BooksWindow(QDialog):
         layout.addLayout(back_row)
 
         # Top buttons
+        # Top buttons
         btn_row = QHBoxLayout()
         self.btn_add = QPushButton("Add book")
         self.btn_edit = QPushButton("Edit book")
         self.btn_delete = QPushButton("Delete book")
         self.btn_refresh = QPushButton("Refresh")
+        self.btn_details = QPushButton("View details")   # NEW
+
         btn_row.addWidget(self.btn_add)
         btn_row.addWidget(self.btn_edit)
         btn_row.addWidget(self.btn_delete)
         btn_row.addWidget(self.btn_refresh)
-        btn_row.addStretch(1)
-        layout.addLayout(btn_row)
+        btn_row.addWidget(self.btn_details)
 
-        # NEW: search box
+        btn_row.addStretch(1)
+
+        # NEW: search + filters
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search by title, author or ISBN...")
+        self.genre_filter = QComboBox()
+        self.genre_filter.addItem("All genres")
+        self.availability_filter = QComboBox()
+        self.availability_filter.addItems(["All books", "Only available"])
+
         btn_row.addWidget(self.search_input)
+        btn_row.addWidget(self.genre_filter)
+        btn_row.addWidget(self.availability_filter)
 
         layout.addLayout(btn_row)
+
         ...
         self.search_input.textChanged.connect(self._apply_search_filter)
 
@@ -92,6 +104,11 @@ class BooksWindow(QDialog):
         self._connect_signals()
         self._load_books()
 
+        # connect filters + search
+        self.search_input.textChanged.connect(self._apply_search_filter)
+        self.genre_filter.currentIndexChanged.connect(self._apply_search_filter)
+        self.availability_filter.currentIndexChanged.connect(self._apply_search_filter)
+
     # ------------------------------------------------------------------
 
     def _connect_signals(self):
@@ -100,10 +117,14 @@ class BooksWindow(QDialog):
         self.btn_delete.clicked.connect(self._handle_delete)
         self.btn_refresh.clicked.connect(self._load_books)
         self.btn_back.clicked.connect(self.close)
+        self.btn_details.clicked.connect(self._show_details)  # NEW
 
     def _load_books(self):
         books = list_books()
         self.table.setRowCount(len(books))
+
+        genres_seen = set()
+
         for row, book in enumerate(books):
             # book is a Book object from models.Book
             self.table.setItem(row, 0, QTableWidgetItem(str(book.book_id)))
@@ -113,6 +134,21 @@ class BooksWindow(QDialog):
             self.table.setItem(row, 4, QTableWidgetItem(book.genre))
             self.table.setItem(row, 5, QTableWidgetItem(str(book.total_copies)))
             self.table.setItem(row, 6, QTableWidgetItem(str(book.available_copies)))
+
+            if book.genre:
+                genres_seen.add(book.genre)
+
+        # update genre filter
+        current = self.genre_filter.currentText()
+        self.genre_filter.blockSignals(True)
+        self.genre_filter.clear()
+        self.genre_filter.addItem("All genres")
+        for g in sorted(genres_seen):
+            self.genre_filter.addItem(g)
+        self.genre_filter.blockSignals(False)
+
+        # re-apply search/filter after reload
+        self._apply_search_filter(self.search_input.text())
 
     def _selected_book_id(self):
         indexes = self.table.selectionModel().selectedRows()
@@ -130,27 +166,86 @@ class BooksWindow(QDialog):
     def _apply_search_filter(self, text: str):
         """
         Simple client-side filter on the current table.
-        Hides rows that do not contain the text in ISBN / Title / Author columns.
+        Uses:
+          - search text (ISBN / Title / Author)
+          - genre filter
+          - availability filter
         """
         text = (text or "").strip().lower()
+        selected_genre = self.genre_filter.currentText()
+        availability_mode = self.availability_filter.currentText()
 
         for row in range(self.table.rowCount()):
+            # --- search text match ---
             if not text:
-                # show everything when search box is empty
-                self.table.setRowHidden(row, False)
-                continue
+                text_matches = True
+            else:
+                text_matches = False
+                for col in (1, 2, 3):  # ISBN, Title, Author
+                    item = self.table.item(row, col)
+                    if item and text in item.text().lower():
+                        text_matches = True
+                        break
 
-            row_matches = False
-            # adjust column indexes if your table order is different:
-            # 0: ID, 1: ISBN, 2: Title, 3: Author, 4: Genre, ...
-            for col in (1, 2, 3):
-                item = self.table.item(row, col)
-                if item and text in item.text().lower():
-                    row_matches = True
-                    break
+            # --- genre match ---
+            genre_item = self.table.item(row, 4)  # Genre
+            genre_text = genre_item.text() if genre_item else ""
+            genre_matches = (
+                selected_genre == "All genres"
+                or genre_text == selected_genre
+            )
 
-            self.table.setRowHidden(row, not row_matches)
+            # --- availability match ---
+            avail_item = self.table.item(row, 6)  # Available copies
+            is_available = False
+            if avail_item:
+                try:
+                    is_available = int(avail_item.text()) > 0
+                except ValueError:
+                    is_available = False
 
+            if availability_mode == "All books":
+                availability_matches = True
+            else:  # "Only available"
+                availability_matches = is_available
+
+            show_row = text_matches and genre_matches and availability_matches
+            self.table.setRowHidden(row, not show_row)
+
+
+    def _show_details(self):
+        book_id = self._selected_book_id()
+        if book_id is None:
+            return
+
+        # Find the row for this book
+        row = None
+        for r in range(self.table.rowCount()):
+            item = self.table.item(r, 0)
+            if item and item.text() == str(book_id):
+                row = r
+                break
+
+        if row is None:
+            QMessageBox.warning(self, "Details", "Could not find book in table.")
+            return
+
+        isbn = self.table.item(row, 1).text()
+        title = self.table.item(row, 2).text()
+        author = self.table.item(row, 3).text()
+        genre = self.table.item(row, 4).text()
+        total = self.table.item(row, 5).text()
+        available = self.table.item(row, 6).text()
+
+        msg = (
+            f"Title: {title}\n"
+            f"Author: {author}\n"
+            f"Genre: {genre}\n"
+            f"ISBN: {isbn}\n"
+            f"Total copies: {total}\n"
+            f"Available: {available}"
+        )
+        QMessageBox.information(self, "Book details", msg)
 
 
     def _handle_add(self):

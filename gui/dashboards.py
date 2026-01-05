@@ -360,18 +360,19 @@ class MemberDashboard(QMainWindow):
         layout.addWidget(hero)
 
         # --- stats for this member ---
-        my_loans = get_loans_for_member(self.member.member_id)
-        my_loans_count = len(my_loans)
+        # --- stats for this member (from DAO helper) ---
+        stats = get_member_reading_stats(self.member.member_id)
+        my_loans_count = stats["active"] + stats["completed"]
+        completed_loans = stats["completed"]
+        progress_percent = stats["progress_percent"]
 
-        completed_loans = sum(1 for loan in my_loans if loan.return_date is not None)
-        if my_loans_count == 0:
-            progress_percent = 0
-        else:
-            progress_percent = round(completed_loans / my_loans_count * 100)
+        # You don't have a reservations table yet, so we keep this as 0 for now.
+        reserved_count = 0
 
-        # demo numbers
-        reserved_count = 1
-        clubs_joined = 2
+        # Real clubs count from the database
+        clubs = list_clubs_for_member(self.member.member_id)
+        clubs_joined = len(clubs)
+
 
         # --------------------------------------
         # MAIN CONTENT: left stats, right actions
@@ -420,6 +421,20 @@ class MemberDashboard(QMainWindow):
 
         left_layout.addLayout(stats_grid)
 
+        # Badge + recent reading summary
+        badge_line = QLabel(
+            f"Badge: {stats['badge']} • Books finished: {stats['completed']}"
+        )
+        badge_line.setStyleSheet("font-size: 13px; font-weight: 700;")
+        left_layout.addWidget(badge_line)
+
+        streak_line = QLabel(
+            f"Recent reading: {stats['recent_7']} book(s) finished in the last 7 days."
+        )
+        streak_line.setStyleSheet("font-size: 12px;")
+        left_layout.addWidget(streak_line)
+
+
         # RIGHT CARD – quick actions
         right_card = QFrame()
         right_card.setObjectName("MemberShortcutsCard")
@@ -440,6 +455,33 @@ class MemberDashboard(QMainWindow):
         shortcuts_title = QLabel("Quick actions")
         shortcuts_title.setStyleSheet("font-size: 17px; font-weight: 700;")
         right_layout.addWidget(shortcuts_title)
+
+        # Small playful section: suggestion + quote
+        suggestion_title = QLabel("Today’s reading boost")
+        suggestion_title.setStyleSheet("font-size: 14px; font-weight: 700;")
+        right_layout.addWidget(suggestion_title)
+
+        suggested_book = get_random_book_suggestion(self.member.member_id)
+        if suggested_book is not None:
+            suggestion_text = (
+                f"Try: {suggested_book.title} "
+                f"by {suggested_book.author_name}"
+            )
+        else:
+            suggestion_text = "No suggestion yet – ask your librarian to add more books!"
+
+        lbl_suggestion = QLabel(suggestion_text)
+        lbl_suggestion.setWordWrap(True)
+        right_layout.addWidget(lbl_suggestion)
+
+        quote = get_random_quote()
+        lbl_quote = QLabel(f"“{quote}”")
+        lbl_quote.setWordWrap(True)
+        lbl_quote.setStyleSheet("font-size: 11px; font-style: italic;")
+        right_layout.addWidget(lbl_quote)
+
+        right_layout.addSpacing(8)
+
 
         self.btn_view_books = QPushButton("Browse books catalogue")
         self.btn_my_loans = QPushButton("View my loans")
@@ -469,7 +511,10 @@ class MemberDashboard(QMainWindow):
         _set_dashboard_background(self.centralWidget())  # keep your photo
 
         self._connect()
-        self._show_due_soon_reminder()
+        self._show_overdue_reminder()     # NEW
+        self._show_due_soon_reminder()    # existing
+
+
 
     # --- signal wiring -----------------------------------------------------
 
@@ -530,12 +575,34 @@ class MemberDashboard(QMainWindow):
         QMessageBox.information(self, "Friendly reminder", msg)
 
 
+    def _show_overdue_reminder(self):
+        """
+        Show a popup if this member has any overdue loans.
+        """
+        loans = get_overdue_loans_for_member(self.member.member_id)
+        if not loans:
+            return
+
+        count = len(loans)
+        # Show up to 3 titles as examples
+        titles = ", ".join(loan.book.title for loan in loans[:3])
+
+        msg = (
+            f"You have {count} overdue book(s).\n"
+            f"Example titles: {titles}\n\n"
+            "Please return your books or request an extension."
+        )
+        QMessageBox.warning(self, "Overdue loans", msg)
+
+
+
 # ---------------------------------------------------------------------------
 # DAO imports at the bottom (to avoid circular issues in some setups)
 # ---------------------------------------------------------------------------
 
 from Roots.daos import (
     get_due_soon_loans_for_member,
+    get_overdue_loans_for_member,
     get_loans_for_member,
     count_members,
     count_books,
@@ -543,4 +610,9 @@ from Roots.daos import (
     count_clubs,
     get_top_borrowed_books,
     get_top_active_members,
+    get_member_reading_stats,        # NEW
+    get_random_book_suggestion,      # NEW
+    get_random_quote,                # NEW
+    list_clubs_for_member,           # already in daos, used for count
 )
+

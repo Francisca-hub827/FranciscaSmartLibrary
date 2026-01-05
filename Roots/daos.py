@@ -11,11 +11,12 @@ Schema (from your script):
 We use pgcrypto's crypt() for password checking.
 """
 
-
+import random
 from typing import List, Optional
+from datetime import date, timedelta
 
 import psycopg2
-
+from psycopg2.extras import RealDictCursor
 
 from .models import Librarian, Member, Book, Loan
 
@@ -1380,3 +1381,586 @@ def return_book(loan_id: int) -> tuple[bool, str]:
         return True, "Book returned successfully."
     finally:
         conn.close()
+
+
+# ============================================================
+#  EXTRA LOAN HELPERS: OVERDUE + EXTENSION REQUESTS
+# ============================================================
+
+def get_overdue_loans_for_member(member_id: int) -> List[Loan]:
+    """
+    Loans for a member that are past due_date and not yet returned.
+    Used for the 'overdue' popup on MemberDashboard.
+    """
+    today = date.today()
+
+    sql = """
+        SELECT
+            l.loan_id,
+            l.loan_date,
+            l.due_date,
+            l.return_date,
+            m.member_id,
+            m.full_name,
+            m.email,
+            u.user_id,
+            u.username,
+            b.book_id,
+            b.isbn,
+            b.title,
+            b.genre,
+            b.total_copies,
+            b.available_copies,
+            a.name AS author_name
+        FROM loan l
+        JOIN member m ON m.member_id = l.member_id
+        JOIN app_user u ON u.user_id = m.user_id
+        JOIN book b ON b.book_id = l.book_id
+        JOIN author a ON a.author_id = b.author_id
+        WHERE m.member_id = %s
+          AND l.return_date IS NULL
+          AND l.due_date < %s
+        ORDER BY l.due_date ASC;
+    """
+
+    conn = get_connection()
+    loans: List[Loan] = []
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(sql, (member_id, today))
+            rows = cur.fetchall()
+            for row in rows:
+                member = Member(
+                    user_id=row["user_id"],
+                    username=row["username"],
+                    member_id=row["member_id"],
+                    full_name=row["full_name"],
+                    email=row["email"],
+                )
+                book = Book(
+                    book_id=row["book_id"],
+                    isbn=row["isbn"],
+                    title=row["title"],
+                    author_name=row["author_name"],
+                    genre=row["genre"],
+                    total_copies=row["total_copies"],
+                    available_copies=row["available_copies"],
+                )
+                loan = Loan(
+                    loan_id=row["loan_id"],
+                    member=member,
+                    book=book,
+                    loan_date=row["loan_date"],
+                    due_date=row["due_date"],
+                    return_date=row["return_date"],
+                )
+                loans.append(loan)
+    finally:
+        conn.close()
+
+    return loans
+
+
+def create_extension_request(loan_id: int, new_due_date: date, reason: str) -> tuple[bool, str]:
+    """
+    Member requests extra time for a loan.
+    - Only for active loans (return_date IS NULL)
+    - Only one PENDING request at a time per loan.
+    """
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Check loan exists and active
+                cur.execute(
+                    """
+                    SELECT loan_id, due_date, return_date
+                    FROM loan
+                    WHERE loan_id = %s;
+                    """,
+                    (loan_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return False, "Loan not found."
+                if row["return_date"] is not None:
+                    return False, "This loan is already returned."
+
+                # Check for existing pending request
+                cur.execute(
+                    """
+                    SELECT 1 FROM loan_extension_request
+                    WHERE loan_id = %s AND status = 'PENDING';
+                    """,
+                    (loan_id,),
+                )
+                if cur.fetchone():
+                    return False, "You already have a pending request for this loan."
+
+                # Create request
+                cur.execute(
+                    """
+                    INSERT INTO loan_extension_request(loan_id, requested_new_due_date, reason)
+                    VALUES (%s, %s, %s)
+                    RETURNING request_id;
+                    """,
+                    (loan_id, new_due_date, reason),
+                )
+
+        return True, "Extension request sent to librarian."
+    finally:
+        conn.close()
+
+
+def list_pending_extension_requests() -> list[dict]:
+    """
+    For librarians: all PENDING loan extension requests.
+    """
+    sql = """
+        SELECT
+            r.request_id,
+            r.loan_id,
+            r.requested_new_due_date,
+            r.reason,
+            r.status,
+            r.created_at,
+            l.due_date AS current_due_date,
+            m.full_name,
+            m.email,
+            b.title
+        FROM loan_extension_request r
+        JOIN loan l ON l.loan_id = r.loan_id
+        JOIN member m ON m.member_id = l.member_id
+        JOIN book b ON b.book_id = l.book_id
+        WHERE r.status = 'PENDING'
+        ORDER BY r.created_at ASC;
+    """
+
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(sql)
+            rows = cur.fetchall()
+            return list(rows)
+    finally:
+        conn.close()
+
+
+def review_extension_request(request_id: int, approve: bool) -> tuple[bool, str]:
+    """
+    Librarian approves or rejects an extension request.
+    - On APPROVE: update loan.due_date to requested_new_due_date.
+    - On REJECT: mark request as REJECTED only.
+    """
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT loan_id, requested_new_due_date, status
+                    FROM loan_extension_request
+                    WHERE request_id = %s;
+                    """,
+                    (request_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return False, "Request not found."
+                if row["status"] != "PENDING":
+                    return False, "Request already processed."
+
+                loan_id = row["loan_id"]
+                new_due = row["requested_new_due_date"]
+                new_status = "APPROVED" if approve else "REJECTED"
+
+                # Update request row
+                cur.execute(
+                    """
+                    UPDATE loan_extension_request
+                    SET status = %s,
+                        reviewed_at = CURRENT_TIMESTAMP
+                    WHERE request_id = %s;
+                    """,
+                    (new_status, request_id),
+                )
+
+                # If approved, update the loan due date
+                if approve:
+                    cur.execute(
+                        """
+                        UPDATE loan
+                        SET due_date = %s
+                        WHERE loan_id = %s;
+                        """,
+                        (new_due, loan_id),
+                    )
+
+        return True, f"Request {new_status.lower()}."
+    finally:
+        conn.close()
+
+
+# ============================================================
+#  BOOK CLUB JOIN REQUESTS + MAX 10 MEMBERS PER CLUB
+# ============================================================
+
+def add_member_to_club(member_id: int, club_id: int) -> tuple[bool, str]:
+    """
+    Librarian directly adds a member to a club.
+    Now enforces max_members limit on club.
+    """
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                # Check club and max_members
+                cur.execute(
+                    "SELECT max_members FROM club WHERE club_id = %s;",
+                    (club_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return False, "Club not found."
+                max_members = row[0]
+
+                # Current member count
+                cur.execute(
+                    "SELECT COUNT(*) FROM club_member WHERE club_id = %s;",
+                    (club_id,),
+                )
+                (current_count,) = cur.fetchone()
+                if current_count >= max_members:
+                    return False, "Club is full (max members reached)."
+
+                # Already inside?
+                cur.execute(
+                    """
+                    SELECT 1 FROM club_member
+                    WHERE member_id = %s AND club_id = %s;
+                    """,
+                    (member_id, club_id),
+                )
+                if cur.fetchone():
+                    return False, "Member is already in this club."
+
+                # Add membership
+                cur.execute(
+                    """
+                    INSERT INTO club_member(member_id, club_id)
+                    VALUES (%s, %s);
+                    """,
+                    (member_id, club_id),
+                )
+        return True, "Member added to club."
+    finally:
+        conn.close()
+
+
+def create_club_join_request(member_id: int, club_id: int) -> tuple[bool, str]:
+    """
+    Member requests to join a club instead of joining instantly.
+    Librarian will approve or reject.
+    """
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Already in club?
+                cur.execute(
+                    """
+                    SELECT 1 FROM club_member
+                    WHERE member_id = %s AND club_id = %s;
+                    """,
+                    (member_id, club_id),
+                )
+                if cur.fetchone():
+                    return False, "You are already a member of this club."
+
+                # Existing pending request?
+                cur.execute(
+                    """
+                    SELECT 1 FROM club_join_request
+                    WHERE member_id = %s AND club_id = %s AND status = 'PENDING';
+                    """,
+                    (member_id, club_id),
+                )
+                if cur.fetchone():
+                    return False, "You already have a pending request for this club."
+
+                # Check club capacity
+                cur.execute(
+                    "SELECT max_members FROM club WHERE club_id = %s;",
+                    (club_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return False, "Club not found."
+                max_members = row["max_members"] if isinstance(row, dict) else row[0]
+
+                cur.execute(
+                    "SELECT COUNT(*) AS cnt FROM club_member WHERE club_id = %s;",
+                    (club_id,),
+                )
+                row2 = cur.fetchone()
+                current_count = row2["cnt"] if isinstance(row2, dict) else row2[0]
+                if current_count >= max_members:
+                    return False, "Club is full (max members reached)."
+
+                # Create request
+                cur.execute(
+                    """
+                    INSERT INTO club_join_request(member_id, club_id)
+                    VALUES (%s, %s);
+                    """,
+                    (member_id, club_id),
+                )
+
+        return True, "Join request sent to librarian."
+    finally:
+        conn.close()
+
+
+def list_pending_club_requests() -> list[dict]:
+    """
+    For librarians: all PENDING club join requests.
+    """
+    sql = """
+        SELECT
+            r.request_id,
+            r.member_id,
+            r.club_id,
+            r.status,
+            r.created_at,
+            m.full_name,
+            m.email,
+            c.name AS club_name,
+            c.max_members
+        FROM club_join_request r
+        JOIN member m ON m.member_id = r.member_id
+        JOIN club c ON c.club_id = r.club_id
+        WHERE r.status = 'PENDING'
+        ORDER BY r.created_at ASC;
+    """
+
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(sql)
+            rows = cur.fetchall()
+            return list(rows)
+    finally:
+        conn.close()
+
+
+def review_club_join_request(request_id: int, approve: bool) -> tuple[bool, str]:
+    """
+    Librarian approves/rejects a club join request.
+    If approved:
+      - checks max_members
+      - inserts member into club_member
+    """
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        r.member_id,
+                        r.club_id,
+                        r.status,
+                        c.max_members
+                    FROM club_join_request r
+                    JOIN club c ON c.club_id = r.club_id
+                    WHERE r.request_id = %s;
+                    """,
+                    (request_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return False, "Request not found."
+                if row["status"] != "PENDING":
+                    return False, "Request already processed."
+
+                member_id = row["member_id"]
+                club_id = row["club_id"]
+                max_members = row["max_members"]
+                new_status = "APPROVED" if approve else "REJECTED"
+
+                if approve:
+                    # Current count
+                    cur.execute(
+                        "SELECT COUNT(*) AS cnt FROM club_member WHERE club_id = %s;",
+                        (club_id,),
+                    )
+                    row2 = cur.fetchone()
+                    current_count = row2["cnt"]
+                    if current_count >= max_members:
+                        return False, "Club is full. Cannot approve."
+
+                    # Add to club_member (if not already)
+                    cur.execute(
+                        """
+                        INSERT INTO club_member(member_id, club_id)
+                        VALUES (%s, %s)
+                        ON CONFLICT DO NOTHING;
+                        """,
+                        (member_id, club_id),
+                    )
+
+                # Update request row
+                cur.execute(
+                    """
+                    UPDATE club_join_request
+                    SET status = %s,
+                        reviewed_at = CURRENT_TIMESTAMP
+                    WHERE request_id = %s;
+                    """,
+                    (new_status, request_id),
+                )
+
+        return True, f"Request {new_status.lower()}."
+    finally:
+        conn.close()
+
+# ============================================================
+#  GAMIFICATION / STATS HELPERS FOR MEMBER DASHBOARD
+# ============================================================
+
+def get_member_reading_stats(member_id: int) -> dict:
+    """
+    Simple stats for one member, used on the MemberDashboard.
+
+    Returns a dict like:
+    {
+        "active": 2,
+        "completed": 5,
+        "recent_7": 2,
+        "badge": "Silver Reader",
+        "progress_percent": 71
+    }
+    """
+    today = date.today()
+    seven_days_ago = today - timedelta(days=7)
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            # total completed (returned) loans
+            cur.execute(
+                "SELECT COUNT(*) FROM loan WHERE member_id = %s AND return_date IS NOT NULL;",
+                (member_id,),
+            )
+            (completed,) = cur.fetchone()
+
+            # active loans
+            cur.execute(
+                "SELECT COUNT(*) FROM loan WHERE member_id = %s AND return_date IS NULL;",
+                (member_id,),
+            )
+            (active,) = cur.fetchone()
+
+            # how many books returned in the last 7 days
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM loan
+                WHERE member_id = %s
+                  AND return_date IS NOT NULL
+                  AND return_date >= %s;
+                """,
+                (member_id, seven_days_ago),
+            )
+            (recent_7,) = cur.fetchone()
+    finally:
+        conn.close()
+
+    total = active + completed
+    if total == 0:
+        progress_percent = 0
+    else:
+        # how much of their borrowing history they actually finished
+        progress_percent = round(completed / total * 100)
+
+    # Badges based on completed books
+    if completed >= 30:
+        badge = "Diamond Reader"
+    elif completed >= 15:
+        badge = "Gold Reader"
+    elif completed >= 5:
+        badge = "Silver Reader"
+    elif completed >= 1:
+        badge = "Bronze Reader"
+    else:
+        badge = "New Reader"
+
+    return {
+        "active": int(active),
+        "completed": int(completed),
+        "recent_7": int(recent_7),
+        "badge": badge,
+        "progress_percent": progress_percent,
+    }
+
+
+def get_random_book_suggestion(member_id: int) -> Optional[Book]:
+    """
+    Suggest a random available book.
+
+    Simple version: any book with available_copies > 0.
+    (You could later exclude books they've already borrowed.)
+    """
+    sql = """
+        SELECT
+            b.book_id,
+            b.isbn,
+            b.title,
+            b.genre,
+            b.total_copies,
+            b.available_copies,
+            a.name AS author_name
+        FROM book b
+        JOIN author a ON a.author_id = b.author_id
+        WHERE b.available_copies > 0
+        ORDER BY random()
+        LIMIT 1;
+    """
+
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(sql)
+            row = cur.fetchone()
+            if not row:
+                return None
+
+            return Book(
+                book_id=row["book_id"],
+                isbn=row["isbn"],
+                title=row["title"],
+                author_name=row["author_name"],
+                genre=row["genre"],
+                total_copies=row["total_copies"],
+                available_copies=row["available_copies"],
+            )
+    finally:
+        conn.close()
+
+
+# A few tiny motivational quotes for the dashboard / login
+_QUOTES = [
+    "One book can change your whole semester.",
+    "Five minutes of reading today is still progress.",
+    "Your future self will thank you for every page.",
+    "Small pages, big dreams.",
+    "Knowledge is your quiet superpower.",
+]
+
+
+def get_random_quote() -> str:
+    """
+    Return a random short quote for MemberDashboard or Login.
+    """
+    if not _QUOTES:
+        return "Happy reading!"
+    return random.choice(_QUOTES)
