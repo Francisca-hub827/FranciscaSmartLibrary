@@ -1,76 +1,105 @@
 # style.py
 from PyQt5.QtWidgets import QMainWindow, QWidget
 
-# ====== COLOUR PALETTE (teal / coffee theme) ======
-# NOTE: We keep the same variable NAMES so existing code continues to work,
-# but the VALUES are now green/teal instead of bright orange.
-
-ORANGE = "#0D9488"       # primary button colour (teal green)
-ORANGE_DARK = "#0F766E"  # hover / darker teal
-BROWN = "#3F2A1F"        # headings / titles (coffee brown)
-BEIGE = "#F4E9DC"        # main background (warm beige)
+# ====== GIRL-POWER PALETTE (soft pink / Pinterest) ======
+PINK = "#EC4899"        # main accent / buttons
+PINK_DARK = "#DB2777"   # hover / stronger accent
+BLUSH = "#FFF5F7"       # very light pink background
+LILAC = "#E9D5FF"       # soft purple for accents if needed
 WHITE = "#FFFFFF"
-TEAL = "#14B8A6"         # accent (lighter teal)
-GREY = "#E5E7EB"
-RED = "#DC2626"
+TEXT_DARK = "#111827"   # near-black text
+TEXT_MUTED = "#6B7280"  # grey for hints
+BORDER = "#E5E7EB"
+ALERT_RED = "#EF4444"
 
 BASE_QSS = f"""
 /* ===== General ===== */
 QMainWindow, QWidget {{
-    background-color: {BEIGE};
+    background-color: {BLUSH};
     font-family: Segoe UI, Arial;
-    color: {BROWN};
+    color: {TEXT_DARK};
 }}
 
+/* ===== Big titles / section headers ===== */
 QLabel#TitleLabel {{
-    font-size: 20px;
-    font-weight: 700;
-    color: {BROWN};
+    font-size: 22px;
+    font-weight: 800;
+    color: {TEXT_DARK};
 }}
 
 QLabel#SubtitleLabel {{
+    font-size: 13px;
+    color: {TEXT_MUTED};
+}}
+
+/* Top “Welcome, Tracy Coker” on member dashboard */
+QLabel#MemberWelcomeTitle {{
+    font-size: 24px;
+    font-weight: 900;
+    color: {TEXT_DARK};
+}}
+
+QLabel#MemberWelcomeSubtitle {{
+    font-size: 13px;
+    color: {TEXT_MUTED};
+}}
+
+/* Small hint / footer text on dashboard */
+QLabel#MemberHintLabel {{
+    font-size: 11px;
+    color: {TEXT_MUTED};
+}}
+
+/* Badge line: “Badge: New Reader – Books finished: 0” */
+QLabel#BadgeLabel {{
     font-size: 12px;
-    color: {BROWN};
+    font-weight: 700;
+    color: {ALERT_RED};
 }}
 
 /* ===== Buttons ===== */
 QPushButton {{
-    background-color: {ORANGE};
+    background-color: {PINK};
     color: {WHITE};
     border-radius: 6px;
-    padding: 6px 12px;
+    padding: 8px 14px;
     font-weight: 600;
     border: none;
 }}
 
 QPushButton:hover {{
-    background-color: {ORANGE_DARK};
+    background-color: {PINK_DARK};
 }}
 
 QPushButton#Secondary {{
     background-color: {WHITE};
-    color: {BROWN};
+    color: {TEXT_DARK};
     border-radius: 6px;
     padding: 6px 12px;
-    border: 1px solid {GREY};
+    border: 1px solid {BORDER};
 }}
 
 QPushButton#Secondary:hover {{
-    background-color: rgba(255, 255, 255, 0.8);
+    background-color: rgba(255, 255, 255, 0.9);
+}}
+
+/* Member dashboard quick-action buttons (right side) */
+QPushButton#DashboardAction {{
+    font-size: 13px;
 }}
 
 /* ===== Tables ===== */
 QTableWidget {{
     background-color: {WHITE};
-    gridline-color: {GREY};
+    gridline-color: {BORDER};
     alternate-background-color: #FAFAFA;
-    border: 1px solid {GREY};
+    border: 1px solid {BORDER};
     border-radius: 6px;
 }}
 
 QHeaderView::section {{
-    background-color: {BEIGE};
-    border: 1px solid {GREY};
+    background-color: {LILAC};
+    border: 1px solid {BORDER};
     padding: 4px;
     font-weight: 600;
 }}
@@ -79,48 +108,65 @@ QHeaderView::section {{
 QLineEdit, QComboBox {{
     background-color: {WHITE};
     border-radius: 4px;
-    border: 1px solid {GREY};
+    border: 1px solid {BORDER};
     padding: 4px 6px;
 }}
 
-/* ===== Dashboard stat cards (we'll use these in member_window.py) ===== */
-QFrame#StatCard {{
-    background-color: rgba(255, 255, 255, 0.92);
-    border-radius: 10px;
-    border: 1px solid {GREY};
+/* ===== Dashboard cards (big left + right panels) ===== */
+QFrame#MemberDashboardCard {{
+    background-color: {WHITE};
+    border-radius: 14px;
+    border: 1px solid {BORDER};
 }}
 
 QLabel#StatLabel {{
     font-size: 11px;
-    color: #6B7280;  /* soft grey text */
+    color: {TEXT_MUTED};
 }}
 
 QLabel#StatValue {{
     font-size: 18px;
     font-weight: 700;
-    color: {ORANGE};
+    color: {PINK};
 }}
 
-/* Progress bar for reading progress (if used) */
+/* Progress bar for reading progress */
 QProgressBar {{
-    border: 1px solid {GREY};
+    border: 1px solid {BORDER};
     border-radius: 6px;
     background: {WHITE};
 }}
 
 QProgressBar::chunk {{
-    background-color: {ORANGE};
+    background-color: {PINK};
     border-radius: 6px;
 }}
 
-/* ===== Overrides for Member dashboard (remove beige background) ===== */
+/* ===== Login screen header ===== */
+
+QFrame#LoginHeaderFrame {{
+    background-color: rgba(236, 72, 153, 220);   /* soft pink strip */
+    border-radius: 12px;
+    padding: 18px 26px;
+}}
+
+QLabel#LoginTitleLabel {{
+    font-size: 28px;
+    font-weight: 900;
+    color: {WHITE};
+}}
+
+QLabel#LoginSubtitleLabel {{
+    font-size: 13px;
+    color: {WHITE};
+}}
+
+/* Let background image show, keep central widgets clean */
 QMainWindow#MemberDashboard,
 QWidget#MemberDashboardCentral {{
     background-color: transparent;
 }}
-"""   # <-- THIS closes BASE_QSS, nothing else goes above it
-def apply_base_style(widget):
-    widget.setStyleSheet(BASE_QSS)
+"""
 
 def apply_base_style(widget):
     widget.setStyleSheet(BASE_QSS)

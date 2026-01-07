@@ -1,6 +1,7 @@
 # Librarian / Member loan management window for Francisca SmartLibrary
 import csv
 from datetime import date, datetime
+
 from PyQt5.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -30,6 +31,7 @@ from Roots.daos import (
     list_pending_extension_requests,
     review_extension_request,
 )
+
 
 class ExtensionRequestsDialog(QDialog):
     """
@@ -208,6 +210,10 @@ class LoansWindow(QDialog):
         self.btn_export = QPushButton("Export to CSV")   # NEW
         self.btn_help = QPushButton("Help")              # NEW
 
+        # NEW: extension-related buttons (created up front so they exist)
+        self.btn_request_extension = QPushButton("Request extension")
+        self.btn_view_requests = QPushButton("Review extension requests")
+
         self.sort_combo = QComboBox()
         self.sort_combo.addItems(
             ["Sort by newest", "Sort by oldest", "Sort by due date"]
@@ -221,23 +227,18 @@ class LoansWindow(QDialog):
         actions.addWidget(self.btn_help)
         actions.addStretch(1)
         actions.addWidget(self.sort_combo)
+        self.btn_refresh.setObjectName("Secondary")  # optional: make refresh look secondary
         actions.addWidget(self.btn_refresh)
-
-        layout.addLayout(actions)
-
 
         # Member sees "Request extension", librarian sees "Review requests"
         if self.member is not None:
+            self.btn_view_requests.hide()
             actions.addWidget(self.btn_request_extension)
         else:
+            self.btn_request_extension.hide()
             actions.addWidget(self.btn_view_requests)
 
-        actions.addStretch(1)
-        actions.addWidget(self.sort_combo)
-        actions.addWidget(self.btn_refresh)
-
         layout.addLayout(actions)
-
 
         # ---- Loans table ----
         self.table = QTableWidget(0, 7)
@@ -277,7 +278,7 @@ class LoansWindow(QDialog):
         self.btn_return.clicked.connect(self._on_return_selected_loan)
         self.sort_combo.currentIndexChanged.connect(self.load_loans_table)
         self.btn_export.clicked.connect(self._export_to_csv)  # NEW
-        self.btn_help.clicked.connect(self._show_help)  # NEW
+        self.btn_help.clicked.connect(self._show_help)        # NEW
 
         if self.member is not None:
             # Member: can request extension for their own loans
@@ -285,7 +286,6 @@ class LoansWindow(QDialog):
         else:
             # Librarian: can review all extension requests
             self.btn_view_requests.clicked.connect(self._on_open_extension_requests)
-
 
     # ------------------- Helpers -------------------
 
@@ -459,7 +459,6 @@ class LoansWindow(QDialog):
         else:
             QMessageBox.warning(self, "Return failed", msg)
 
-
     def _export_to_csv(self):
         """
         Export the loans currently shown in the table to a CSV file.
@@ -518,8 +517,6 @@ class LoansWindow(QDialog):
         )
         QMessageBox.information(self, "Loans help", text)
 
-
-
     def _on_request_extension(self):
         """
         Member: request more time for the selected loan.
@@ -541,8 +538,6 @@ class LoansWindow(QDialog):
         )
         if not ok or not text.strip():
             return
-
-        from datetime import datetime
 
         try:
             new_due = datetime.strptime(text.strip(), "%Y-%m-%d").date()
@@ -575,4 +570,3 @@ class LoansWindow(QDialog):
         """
         dlg = ExtensionRequestsDialog(self)
         dlg.exec_()
-

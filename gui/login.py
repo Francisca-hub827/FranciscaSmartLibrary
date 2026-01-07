@@ -40,8 +40,6 @@ class LoginWindow(QDialog):
 
         # Start maximised so the background fills the screen
         self.setWindowState(Qt.WindowMaximized)
-        # (Optional) you can keep this as a fallback size if user restores from maximise:
-        # self.resize(900, 550)
 
         self.logged_in_user = None
         self.role = "librarian"   # default
@@ -53,7 +51,7 @@ class LoginWindow(QDialog):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # This label will show the Pinterest library image
+        # Background image label
         self.bg_label = QLabel()
         self.bg_label.setObjectName("BgLabel")
         self.bg_label.setScaledContents(True)  # image stretches to fill window
@@ -65,22 +63,29 @@ class LoginWindow(QDialog):
         overlay.setSpacing(10)
 
         # =========================
-        #  TITLE + SUBTITLE
+        #  PINK HEADER STRIP
         # =========================
+        header_frame = QFrame()
+        header_frame.setObjectName("LoginHeaderFrame")
+        header_layout = QVBoxLayout(header_frame)
+        header_layout.setContentsMargins(24, 16, 24, 18)
+        header_layout.setSpacing(4)
+
         title = QLabel("Welcome to Francisca SmartLibrary")
-        title.setObjectName("TitleLabel")
+        title.setObjectName("LoginTitleLabel")
         title.setAlignment(Qt.AlignHCenter)
 
         subtitle_text = random.choice(MOTIVATION_LINES)
         subtitle = QLabel(
             subtitle_text + "\nSign in as Librarian (admin) or Member (user)."
         )
-        subtitle.setObjectName("SubtitleLabel")
+        subtitle.setObjectName("LoginSubtitleLabel")
         subtitle.setAlignment(Qt.AlignHCenter)
 
+        header_layout.addWidget(title)
+        header_layout.addWidget(subtitle)
 
-        overlay.addWidget(title)
-        overlay.addWidget(subtitle)
+        overlay.addWidget(header_frame)
 
         # =========================
         #  LOGIN CARD
@@ -135,8 +140,8 @@ class LoginWindow(QDialog):
         #  STYLES + SIGNALS
         # =========================
         apply_base_style(self)         # your existing theme (fonts, base colours)
-        self._apply_card_styles()      # extra nice styles for card/buttons
-        self._load_background_image()  # <- Pinterest image goes here
+        self._apply_card_styles()      # extra styles for header/card/buttons
+        self._load_background_image()  # Pinterest image
 
         self.btn_cancel.clicked.connect(self.reject)
         self.btn_login.clicked.connect(self._handle_login)
@@ -151,7 +156,6 @@ class LoginWindow(QDialog):
         base_dir = os.path.dirname(os.path.abspath(__file__))
         bg_path = os.path.join(base_dir, "assets", "library_bg.jpg")
 
-        # Debug prints – helpful if it ever fails
         print("LOGIN BG: looking for:", bg_path)
 
         if not os.path.exists(bg_path):
@@ -168,8 +172,7 @@ class LoginWindow(QDialog):
 
     def _apply_card_styles(self):
         """
-        Style the floating login card and buttons.
-        Background image is handled by QLabel pixmap.
+        Style the floating login card and the header text.
         """
         self.setStyleSheet("""
         QFrame#LoginCard {
@@ -177,15 +180,22 @@ class LoginWindow(QDialog):
             border-radius: 18px;
         }
 
-        QLabel#TitleLabel {
-            color: #ffffff;
-            font-size: 22px;
-            font-weight: 700;
+        /* Pink header strip */
+        QFrame#LoginHeaderFrame {
+            background: rgba(255, 255, 255, 0.90);
+            border-radius: 18px;
+            border: 2px solid #F9A8D4;   /* soft pink border */
         }
 
-        QLabel#SubtitleLabel {
-            color: #f5f2ea;
-            font-size: 11px;
+        QLabel#LoginTitleLabel {
+            color: #BE185D;              /* deep pink */
+            font-size: 32px;
+            font-weight: 800;
+        }
+
+        QLabel#LoginSubtitleLabel {
+            color: #4B5563;              /* soft grey */
+            font-size: 14px;
         }
 
         QLineEdit {
@@ -203,22 +213,22 @@ class LoginWindow(QDialog):
 
         QPushButton#Secondary {
             background: transparent;
-            border: 1px solid #f2e3cf;
-            color: #f5f2ea;
+            border: 1px solid #FBCFE8;
+            color: #9D174D;
         }
 
         QPushButton#Secondary:hover {
-            background: rgba(255,255,255,0.3);
+            background: rgba(252, 231, 243, 0.6);
         }
 
         QPushButton:not(#Secondary) {
-            background-color: #c76b3c;
+            background-color: #EC4899;   /* main pink button */
             color: white;
             border: none;
         }
 
         QPushButton:not(#Secondary):hover {
-            background-color: #e07a40;
+            background-color: #DB2777;
         }
         """)
 

@@ -15,7 +15,7 @@ from PyQt5.QtWidgets import (
     QSizePolicy,   # NEW: to make cards expand nicely
 )
 
-from .style import apply_base_style, ORANGE, TEAL
+from .style import apply_base_style, PINK, LILAC, TEXT_DARK, TEXT_MUTED
 from Roots.models import Librarian, Member
 from .books_window import BooksWindow
 from .member_window import MembersWindow
@@ -202,16 +202,16 @@ class LibrarianDashboard(QMainWindow):
         tiles = QGridLayout()
         tiles.setSpacing(10)
         tiles.addWidget(
-            _make_tile("Members", str(members_count), ORANGE), 0, 0
+            _make_tile("Members", str(members_count), PINK), 0, 0
         )
         tiles.addWidget(
-            _make_tile("Issued books", str(loans_count), TEAL), 0, 1
+            _make_tile("Issued books", str(loans_count), LILAC), 0, 1
         )
         tiles.addWidget(
-            _make_tile("Books", str(books_count), ORANGE), 1, 0
+            _make_tile("Books", str(books_count), PINK), 1, 0
         )
         tiles.addWidget(
-            _make_tile("Clubs", str(clubs_count), TEAL), 1, 1
+            _make_tile("Clubs", str(clubs_count), LILAC), 1, 1
         )
 
         layout.addLayout(tiles)
@@ -425,13 +425,13 @@ class MemberDashboard(QMainWindow):
         badge_line = QLabel(
             f"Badge: {stats['badge']} • Books finished: {stats['completed']}"
         )
-        badge_line.setStyleSheet("font-size: 13px; font-weight: 700;")
+        badge_line.setStyleSheet("font-size: 13px; font-weight: 700; color: #b45309;")
         left_layout.addWidget(badge_line)
 
         streak_line = QLabel(
             f"Recent reading: {stats['recent_7']} book(s) finished in the last 7 days."
         )
-        streak_line.setStyleSheet("font-size: 12px;")
+        streak_line.setStyleSheet("font-size: 12px; color: #111827;")
         left_layout.addWidget(streak_line)
 
 
@@ -449,11 +449,11 @@ class MemberDashboard(QMainWindow):
         right_card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
 
         right_layout = QVBoxLayout(right_card)
-        right_layout.setContentsMargins(16, 14, 16, 14)
-        right_layout.setSpacing(12)
+        right_layout.setContentsMargins(16, 22, 16, 16)
+        right_layout.setSpacing(14)
 
         shortcuts_title = QLabel("Quick actions")
-        shortcuts_title.setStyleSheet("font-size: 17px; font-weight: 700;")
+        shortcuts_title.setStyleSheet("font-size: 18px; font-weight: 800; color: #111827;")
         right_layout.addWidget(shortcuts_title)
 
         # Small playful section: suggestion + quote
@@ -493,7 +493,7 @@ class MemberDashboard(QMainWindow):
             btn.setMinimumHeight(52)
             btn.setCursor(Qt.PointingHandCursor)
             # bigger button text like the Pinterest call-to-actions
-            btn.setStyleSheet("font-size: 15px; font-weight: 600;")
+            btn.setStyleSheet("font-size: 16px; font-weight: 700;")
             right_layout.addWidget(btn)
 
         right_layout.addStretch(1)
